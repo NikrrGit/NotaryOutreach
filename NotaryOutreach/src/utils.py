@@ -25,3 +25,39 @@ def normalize_url(url: str) -> str:
     netloc = host if port in (None, DEFAULT_PORTS[scheme]) else f"{host}:{port}"
     path = parsed.path.rstrip("/")
     return urlunsplit((scheme, netloc, path, "", ""))
+
+
+def extract_contacts(text: str) -> dict[str, str | None]:
+    """Return the first email and phone-like string found in `text`, or None each."""
+    if not isinstance(text, str):
+        raise ValidationError("Text must be a string.")
+    email_match = EMAIL_RE.search(text)
+    phone_match = PHONE_RE.search(text)
+    return {
+        "email": email_match.group(0) if email_match else None,
+        "phone": phone_match.group(0).strip() if phone_match else None,
+    }
+ 
+ 
+def _dedupe_key(candidate: Candidate) -> str:
+    """Prefer a normalized website; fall back to normalized name+city."""
+    if candidate.website:
+        try:
+            return normalize_url(candidate.website)
+        except ValidationError:
+            pass
+    return f"{candidate.name.strip().lower()}|{candidate.city.strip().lower()}"
+ 
+ 
+def dedupe_candidates(candidates: list[Candidate]) -> list[Candidate]:
+    """Drop candidates that share a normalized website or name+city, keeping the first."""
+    seen: set[str] = set()
+    deduped: list[Candidate] = []
+    for candidate in candidates:
+        key = _dedupe_key(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(candidate)
+    return deduped
+ 
