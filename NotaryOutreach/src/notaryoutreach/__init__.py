@@ -1,2 +1,4 @@
-def main() -> None:
-    print("Hello from notaryoutreach!")
+def main() -> int:
+    from .main import main as run
+
+    return run()
