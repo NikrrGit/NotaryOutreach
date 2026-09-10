@@ -1,110 +1,89 @@
-"""Run the notary outreach pipeline: connect, discover, verify, persist."""
+"""Run one outreach stage at a time and output candidates as JSON."""
 
 import argparse
+import json
+import logging
 import sys
 from pathlib import Path
 
-from groq import APIError as GroqAPIError
-from postgrest.exceptions import APIError as PostgrestAPIError
-
 from .config import ConfigurationError, load_config
-from .database import connect, inspect_notaries
-from .discovery import build_client as build_groq_client
-from .discovery import discover_notaries
+from .database import SCHEMA_SQL, connect, inspect_notaries
+from .discovery import build_client, discover_notaries
+from .email_generator import generate_emails
 from .models import Candidate, CandidateStatus, ValidationError
+from .utils import dedupe_candidates
 from .verification import verify_candidates
 
 
-def phase1_connectivity(env_file: Path):
-    """Confirm the Supabase connection is usable; return the client for later phases."""
-    settings = load_config(env_file)
-    client = connect(settings)
-    inspect_notaries(client)  # Raises on failure; the columns themselves aren't needed here.
-    return client
-
-
-def phase2_discovery(env_file: Path, city: str, limit: int) -> list[Candidate]:
-    """Find raw notary candidates for `city` via Groq web search."""
-    with build_groq_client(env_file) as groq_client:
-        return discover_notaries(groq_client, city, limit)
-
-
-def phase3_verification(env_file: Path, candidates: list[Candidate]) -> list[Candidate]:
-    """Assess UG-formation suitability for each discovered candidate."""
-    with build_groq_client(env_file) as groq_client:
-        return verify_candidates(groq_client, candidates)
-
-
-def phase4_persist(db_client, candidates: list[Candidate]) -> int:
-    """Upsert non-errored candidates into public.notaries, keyed on source_url."""
-    payload = [c.to_dict() for c in candidates if c.status != CandidateStatus.ERROR]
-    if not payload:
-        return 0
-    response = db_client.table("notaries").upsert(payload, on_conflict="source_url").execute()
-    return len(response.data or [])
+def read_candidates(path: Path | None) -> list[Candidate]:
+    try:
+        raw = path.read_text(encoding="utf-8") if path else sys.stdin.read()
+        items = json.loads(raw)
+        if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+            raise ValidationError("Expected an array of candidate objects.")
+        return [Candidate.from_dict(item) for item in items]
+    except (ValueError, TypeError, OSError) as exc:
+        raise ValidationError("Supply a valid UTF-8 JSON array of candidate objects.") from exc
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("city", nargs="?", default="Stuttgart", help="City to search (default: Stuttgart).")
-    parser.add_argument("--limit", type=int, default=10, help="Max candidates to discover.")
-    parser.add_argument("--skip-persist", action="store_true", help="Run discovery and verification only.")
     parser.add_argument(
-        "--env-file", type=Path, default=Path(".env"),
-        help="Environment file (default: .env in the current directory).",
+        "--stage", choices=("connect", "discover", "dedupe", "verify", "email"),
+        default="connect", help="Stage to run (default: connect).",
     )
+    parser.add_argument("city", nargs="?", default="Stuttgart")
+    parser.add_argument("--limit", type=int, default=10)
+    parser.add_argument("--input", type=Path, help="Candidate JSON file (default: stdin).")
+    parser.add_argument("--env-file", type=Path, default=Path(".env"))
+    parser.add_argument("--schema-sql", action="store_true", help="Print read-only schema inspection SQL.")
     args = parser.parse_args()
-
-    try:
-        print(f"Phase 1: checking Supabase connectivity for '{args.city}' run...")
-        db_client = phase1_connectivity(args.env_file)
-        print("Phase 1 OK: public.notaries is reachable.")
-    except ConfigurationError as exc:
-        print(f"Phase 1 failed: configuration error: {exc}", file=sys.stderr)
-        return 1
-    except PostgrestAPIError as exc:
-        print(f"Phase 1 failed: Supabase rejected the query ({exc.code}).", file=sys.stderr)
-        return 1
-
-    try:
-        print(f"Phase 2: discovering up to {args.limit} candidate(s) in {args.city}...")
-        candidates = phase2_discovery(args.env_file, args.city, args.limit)
-        print(f"Phase 2 OK: {len(candidates)} candidate(s) discovered.")
-    except ConfigurationError as exc:
-        print(f"Phase 2 failed: configuration error: {exc}", file=sys.stderr)
-        return 1
-    except (ValidationError, GroqAPIError) as exc:
-        print(f"Phase 2 failed: {exc}", file=sys.stderr)
-        return 1
-    if not candidates:
-        print("No candidates discovered; stopping before verification.")
+    if args.limit < 1 or not args.city.strip():
+        parser.error("City must be nonempty and --limit must be positive.")
+    if args.input and args.stage in {"connect", "discover"}:
+        parser.error("--input is only used by dedupe, verify, and email.")
+    logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s", level=logging.ERROR)
+    if args.schema_sql:
+        print(SCHEMA_SQL)
         return 0
 
     try:
-        print(f"Phase 3: verifying {len(candidates)} candidate(s)...")
-        verified = phase3_verification(args.env_file, candidates)
-        relevant = sum(1 for c in verified if c.status == CandidateStatus.RELEVANT)
-        print(f"Phase 3 OK: {relevant} of {len(verified)} candidate(s) look relevant.")
-    except ConfigurationError as exc:
-        print(f"Phase 3 failed: configuration error: {exc}", file=sys.stderr)
+        if args.stage == "connect":
+            columns = inspect_notaries(connect(load_config(args.env_file)))
+            print("Supabase connection OK: public.notaries SELECT succeeded.")
+            if columns is None:
+                print("No rows visible: the table may be empty or filtered by RLS.")
+            else:
+                print("Existing columns: " + ", ".join(columns))
+            print("No data changed. Schema, insert permissions, and Lovable visibility still need checking.")
+            return 0
+
+        if args.stage == "discover":
+            with build_client(args.env_file) as client:
+                results = discover_notaries(client, args.city, args.limit)
+        else:
+            candidates = read_candidates(args.input)
+            if args.stage == "dedupe":
+                results = dedupe_candidates(candidates)
+            elif not candidates:
+                results = []
+            else:
+                with build_client(args.env_file) as client:
+                    results = (
+                        verify_candidates(client, candidates) if args.stage == "verify"
+                        else generate_emails(client, candidates)
+                    )
+    except (ConfigurationError, ValidationError) as exc:
+        print(f"Stage {args.stage} failed: {exc}", file=sys.stderr)
         return 1
-    except GroqAPIError as exc:
-        print(f"Phase 3 failed: {exc}", file=sys.stderr)
+    except Exception:
+        print(f"Stage {args.stage} failed. Check credentials, service access, and network.", file=sys.stderr)
         return 1
 
-    if args.skip_persist:
-        print("Skipping persistence (--skip-persist).")
-        return 0
-
-    try:
-        print("Phase 4: persisting verified candidates...")
-        inserted = phase4_persist(db_client, verified)
-        print(f"Phase 4 OK: {inserted} row(s) upserted into public.notaries.")
-    except PostgrestAPIError as exc:
-        print(f"Phase 4 failed: Supabase rejected the upsert ({exc.code}).", file=sys.stderr)
-        return 1
-
-    return 0
+    print(json.dumps([candidate.to_dict() for candidate in results], indent=2, ensure_ascii=False))
+    errors = sum(candidate.status == CandidateStatus.ERROR for candidate in results)
+    print(f"Stage {args.stage}: {len(results)} candidate(s); {errors} error(s).", file=sys.stderr)
+    return 1 if errors else 0
 
 
 if __name__ == "__main__":
