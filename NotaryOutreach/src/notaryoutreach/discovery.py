@@ -21,6 +21,8 @@ SYSTEM_PROMPT = (
     "Search the web and return only verifiable, real businesses. "
     "Search for Notar UG Gründung, GmbH Gründung, and Gesellschaftsrecht. "
     "Prefer the official German notary directory and official notary websites. "
+    "Include only practising notary offices whose published address is in the requested city. "
+    "Exclude chambers, directories, and offices in other cities; never assume a location. "
     "Respond with a JSON array only, no prose, no markdown fences. "
     "Each item: {name, city, source_url, website, email, phone}. "
     "Require a verified name, city and HTTP(S) source_url; omit entries missing these. "
@@ -48,6 +50,8 @@ def discover_notaries(client: Groq, city: str, limit: int = 10) -> list[Candidat
             {"role": "user", "content": f"Find up to {limit} notaries in {city}."},
         ],
         temperature=0,
+        max_completion_tokens=3500,
+        extra_headers={"Groq-Model-Version": "2025-07-23"},
         compound_custom={"tools": {"enabled_tools": ["web_search"]}},
     )
     if not response.choices or not response.choices[0].message.content:
@@ -69,6 +73,8 @@ def discover_notaries(client: Groq, city: str, limit: int = 10) -> list[Candidat
         try:
             data = {field: item.get(field) for field in FIELDS}
             if any(value is not None and not isinstance(value, str) for value in data.values()):
+                continue
+            if not data["city"] or data["city"].strip().casefold() != city.casefold():
                 continue
             for field in ("source_url", "website"):
                 value = data[field]

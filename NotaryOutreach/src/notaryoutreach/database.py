@@ -1,23 +1,25 @@
-"""Read-only Supabase connection check for Phase 1."""
+"""Authenticate with Supabase and test the Lovable database connection."""
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
+from dotenv import dotenv_values
 from postgrest.exceptions import APIError
 from supabase import Client, create_client
 from supabase.client import ClientOptions
 
 from .config import ConfigurationError, Settings, load_config
 
+TEST_ID = "cb46ccad-fb67-4a26-b38e-b29ac039530d"
+TEST_NAME = "[TEST] Local Python connection"
 
 EXPECTED_COLUMNS = (
     "id", "name", "city", "website", "email", "phone", "source_url",
-    "company_formation_supported", "confidence", "verification_reason",
-    "personalised_email", "status", "created_at", "updated_at",
+    "personalised_email", "status", "created_at",
 )
 
-# Run in the Supabase SQL Editor: the Data API cannot inspect SQL constraints.
 SCHEMA_SQL = """-- Read-only inspection of the existing public.notaries table.
 SELECT column_name, data_type, udt_name, is_nullable, column_default
 FROM information_schema.columns
@@ -39,9 +41,13 @@ WHERE schemaname = 'public' AND tablename = 'notaries';
 """
 
 
-def connect(settings: Settings) -> Client:
-    """Create a client; a successful query is needed to confirm connectivity."""
-    return create_client(
+def connect(settings: Settings, env_file: str | Path = ".env") -> Client:
+    values = {**dotenv_values(env_file), **os.environ}
+    email = (values.get("SUPABASE_EMAIL") or "").strip()
+    password = values.get("SUPABASE_PASSWORD")
+    if not email or not password:
+        raise ConfigurationError("Set SUPABASE_EMAIL and SUPABASE_PASSWORD for your dashboard account in .env.")
+    client = create_client(
         settings.supabase_url,
         settings.supabase_key,
         options=ClientOptions(
@@ -51,16 +57,34 @@ def connect(settings: Settings) -> Client:
             persist_session=False,
         ),
     )
+    try:
+        response = client.auth.sign_in_with_password({"email": email, "password": password})
+    except Exception as exc:
+        raise ConfigurationError("Supabase sign-in failed. Check dashboard credentials, email confirmation, and network.") from exc
+    if response.session is None:
+        raise ConfigurationError("Supabase sign-in returned no session.")
+    return client
 
 
 def inspect_notaries(client: Client) -> list[str] | None:
-    """Return column names from at most one visible row, without printing data.
-
-    None means no row was visible, which can mean an empty table or an RLS
-    policy filtering results. This does not establish write permissions.
-    """
     response = client.table("notaries").select("*").limit(1).execute()
     return sorted(response.data[0]) if response.data else None
+
+
+def insert_test_notary(client: Client) -> str:
+    rows = client.table("notaries").select("id").eq("id", TEST_ID).execute().data
+    if not rows:
+        client.table("notaries").insert({
+            "id": TEST_ID,
+            "name": TEST_NAME,
+            "city": "Stuttgart",
+            "personalised_email": "Technischer Verbindungstest. Keine echte Anfrage; bitte nicht versenden.",
+            "status": "pending",
+        }).execute()
+    rows = client.table("notaries").select("id").eq("id", TEST_ID).execute().data
+    if not rows:
+        raise RuntimeError("Test record could not be read back.")
+    return str(rows[0]["id"])
 
 
 def main() -> int:
@@ -73,18 +97,23 @@ def main() -> int:
         "--schema-sql", action="store_true",
         help="Print read-only SQL to run in Supabase SQL Editor, then exit.",
     )
+    parser.add_argument("--test-insert", action="store_true", help="Create or reuse one labelled test record and read it back.")
     args = parser.parse_args()
+    if args.schema_sql and args.test_insert:
+        parser.error("Choose either --schema-sql or --test-insert.")
     if args.schema_sql:
         print(SCHEMA_SQL)
         return 0
 
     try:
-        columns = inspect_notaries(connect(load_config(args.env_file)))
+        client = connect(load_config(args.env_file), args.env_file)
+        columns = inspect_notaries(client)
+        if args.test_insert:
+            record_id = insert_test_notary(client)
     except ConfigurationError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 1
     except APIError as exc:
-        # Avoid printing response bodies, URLs, credentials, or record values.
         if exc.code in {"PGRST205", "42P01"}:
             message = "public.notaries was not found in the accessible API schema."
         elif exc.code in {"42501", "PGRST301", "PGRST302", "PGRST303"}:
@@ -101,7 +130,7 @@ def main() -> int:
         )
         return 1
 
-    print("Supabase connection OK: public.notaries SELECT succeeded.")
+    print("Authenticated Supabase connection OK: public.notaries SELECT succeeded.")
     if columns is None:
         print("No rows visible: the table may be empty or filtered by RLS.")
         print("Column names could not be inspected from a row.")
@@ -113,7 +142,11 @@ def main() -> int:
         else:
             print("All expected column names are present.")
     print("Run with --schema-sql, then paste the printed SQL into Supabase SQL Editor.")
-    print("No data changed. Insert permissions and Lovable visibility are not yet verified.")
+    if args.test_insert:
+        print(f"Test record ready and readable: {record_id}")
+        print(f"Refresh the Lovable dashboard and look for: {TEST_NAME}")
+    else:
+        print("No data changed. Run with --test-insert to test dashboard integration.")
     return 0
 
 

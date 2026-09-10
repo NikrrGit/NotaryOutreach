@@ -13,11 +13,12 @@ from .config import ConfigurationError
 from .discovery import build_client
 from .models import Candidate, CandidateStatus, ValidationError
 
-MODEL = "llama-3.3-70b-versatile"
+MODEL = "openai/gpt-oss-120b"
+SIGNATURE = "Mit freundlichen Grüßen\nNik\nSKAI startup centre, Tübingen"
 SYSTEM_PROMPT = (
     "Write a professional German email of 60–120 whitespace-separated words. "
     'Return only a JSON object with one field: {"email": "email body"}. '
-    "Start with 'Guten Tag,' and end with 'Mit freundlichen Grüßen' and '[Nik]'. "
+    f"Start with 'Guten Tag,' and end with this exact signature: {SIGNATURE!r}. "
     "We are forming a UG (haftungsbeschränkt). Ask whether the notary can handle "
     "the Gründung or Beurkundung and ask for the frühestmöglichen Termin. "
     "Lightly personalise using only the supplied verified formation evidence. "
@@ -47,7 +48,8 @@ def generate_email(client: Groq, candidate: Candidate) -> Candidate:
             }, ensure_ascii=False)},
         ],
         temperature=0,
-        max_completion_tokens=800,
+        reasoning_effort="low",
+        max_completion_tokens=2000,
         response_format={"type": "json_object"},
     )
     if not response.choices or not response.choices[0].message.content:
@@ -69,7 +71,7 @@ def generate_email(client: Groq, candidate: Candidate) -> Candidate:
         or "frühest" not in lower
         or not any(word in lower for word in ("gründung", "beurkundung"))
         or not email.startswith("Guten Tag,")
-        or not email.endswith("Mit freundlichen Grüßen\n[Name]")
+        or not email.endswith(SIGNATURE)
     ):
         raise ValidationError("Email is missing the required request, greeting, or signature.")
     return replace(candidate, personalised_email=email, status=CandidateStatus.REVIEW)

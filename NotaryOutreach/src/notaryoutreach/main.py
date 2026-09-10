@@ -49,7 +49,7 @@ def main() -> int:
 
     try:
         if args.stage == "connect":
-            columns = inspect_notaries(connect(load_config(args.env_file)))
+            columns = inspect_notaries(connect(load_config(args.env_file), args.env_file))
             print("Supabase connection OK: public.notaries SELECT succeeded.")
             if columns is None:
                 print("No rows visible: the table may be empty or filtered by RLS.")

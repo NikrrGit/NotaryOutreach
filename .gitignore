@@ -149,6 +149,7 @@ activemq-data/
 
 # Environments
 .env
+/runs/
 .env.*
 !.env.example
 .envrc
