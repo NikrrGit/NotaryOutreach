@@ -39,7 +39,11 @@ def extract_contacts(text: str) -> dict[str, str | None]:
     if not isinstance(text, str):
         raise ValidationError("Text must be a string.")
     text = unescape(text)
-    email_match = EMAIL_RE.search(text)
+    emails = list(dict.fromkeys(EMAIL_RE.findall(text)))
+    emails = [email for email in emails if not re.search(
+        r"bewerb|karriere|career|jobs|personalabteilung|datenschutz|privacy|noreply|no-reply|presse", email, re.I,
+    )]
+    emails.sort(key=lambda email: not re.match(r"info@|kanzlei@|kontakt@|zentrale@|mail@|sekretariat@", email, re.I))
     phone = next(
         (match.group(0).strip() for match in PHONE_RE.finditer(text)
          if 7 <= len(re.sub(r"\D", "", match.group(0))) <= 15
@@ -47,7 +51,7 @@ def extract_contacts(text: str) -> dict[str, str | None]:
         None,
     )
     return {
-        "email": email_match.group(0) if email_match else None,
+        "email": emails[0] if emails else None,
         "phone": phone,
     }
 

@@ -7,12 +7,14 @@ import re
 import sys
 from dataclasses import replace
 from html import unescape
+from io import BytesIO
 from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
 
 from groq import APIError, Groq
+from pypdf import PdfReader
 
 from .config import ConfigurationError
 from .discovery import build_client
@@ -41,17 +43,20 @@ SYSTEM_PROMPT = (
 )
 
 
-def fetch_page_text(url: str, service_links: list[str] | None = None) -> str:
+def fetch_page_text(url: str, service_links: list[str] | None = None, max_chars: int = MAX_PAGE_CHARS) -> str:
     normalize_url(url)
     request = Request(url, headers={"User-Agent": "Mozilla/5.0"})
     try:
         with urlopen(request, timeout=FETCH_TIMEOUT) as response:
-            if response.headers.get_content_type() not in {"text/html", "application/xhtml+xml", "text/plain"}:
+            content_type = response.headers.get_content_type()
+            if content_type not in {"text/html", "application/xhtml+xml", "text/plain", "application/pdf"}:
                 raise ValidationError("Website did not return HTML or plain text.")
             body = response.read(MAX_PAGE_BYTES + 1)
             if len(body) > MAX_PAGE_BYTES:
                 raise ValidationError("Website exceeds the download limit.")
-            raw = body.decode(response.headers.get_content_charset() or "utf-8", errors="replace")
+            raw = ("\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(body)).pages)
+                   if content_type == "application/pdf"
+                   else body.decode(response.headers.get_content_charset() or "utf-8", errors="replace"))
     except (URLError, OSError, ValueError, LookupError) as exc:
         raise ValidationError("Could not read website text.") from exc
     raw = re.sub(r"<(script|style)\b[^>]*>.*?</\1\s*>|<!--.*?-->", " ", raw, flags=re.I | re.S)
@@ -62,8 +67,16 @@ def fetch_page_text(url: str, service_links: list[str] | None = None) -> str:
                     and re.search(r"gesellschaft|unternehmen|gr[uü](?:e)?nd|gmbh", link, flags=re.I)
                     and link != url and link not in service_links):
                 service_links.append(link)
-    text = re.sub(r"\s+", " ", unescape(TAG_RE.sub(" ", raw))).strip()
-    return text[:MAX_PAGE_CHARS]
+    text = re.sub(r"\s+", " ", unescape(TAG_RE.sub(" ", raw))).replace("\xad", "").strip()
+    if len(text) <= max_chars:
+        return text
+    excerpts = [text[:1200]]
+    for match in re.finditer(r"gesellschaftsgr|unternehmensgr|gmbh|unternehmergesellschaft|gründung|gruendung", text, re.I):
+        excerpts.append(text[max(0, match.start() - 200):match.end() + 350])
+        if sum(map(len, excerpts)) > max_chars - 1000:
+            break
+    excerpts.append(text[-800:])
+    return " ... ".join(excerpts)[:max_chars]
 
 
 def verify_candidate(client: Groq, candidate: Candidate) -> Candidate:
@@ -73,15 +86,20 @@ def verify_candidate(client: Groq, candidate: Candidate) -> Candidate:
         raise ValidationError("No website to inspect.")
 
     links = []
-    page_text = fetch_page_text(candidate.website, links)
-    if not page_text:
-        raise ValidationError("Website returned no readable text.")
-    pages = [(candidate.website, page_text)]
-    for link in links[:2]:
+    try:
+        page_text = fetch_page_text(candidate.website, links)
+    except ValidationError:
+        page_text = ""
+    pages = [(candidate.website, page_text)] if page_text else []
+    if candidate.source_url != candidate.website and urlsplit(candidate.source_url).hostname == urlsplit(candidate.website).hostname:
+        links.insert(0, candidate.source_url)
+    for link in dict.fromkeys(links[:3]):
         try:
             pages.append((link, fetch_page_text(link)))
         except Exception:
             continue
+    if not pages:
+        raise ValidationError("Website returned no readable text.")
 
     response = client.chat.completions.create(
         model=MODEL,

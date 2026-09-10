@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "groq",
+    "pypdf",
     "supabase>=2,<3",
     "python-dotenv>=1,<2",
 ]

@@ -3,8 +3,10 @@
 import argparse
 import json
 import logging
+import shutil
 from dataclasses import replace
 from pathlib import Path
+from time import time_ns
 from urllib.parse import urljoin, urlsplit
 from uuid import NAMESPACE_URL, uuid5
 
@@ -47,20 +49,25 @@ def confirm_contact(candidate: Candidate) -> tuple[Candidate, str]:
     contact_url = candidate.source_url if urlsplit(candidate.source_url).hostname == urlsplit(candidate.website).hostname else candidate.website
     for url in dict.fromkeys((candidate.website, contact_url, urljoin(candidate.website, "/impressum/"), urljoin(candidate.website, "/kontakt/"))):
         try:
-            text = fetch_page_text(url)
+            text = fetch_page_text(url, max_chars=30000)
         except Exception:
             continue
         pages.append(text)
         contact = extract_contacts(text)
-        email = candidate.email if candidate.email and candidate.email.casefold() in text.casefold() else contact["email"]
+        email = contact["email"]
         if email and EMAIL_RE.fullmatch(email.strip()) and candidate.city.casefold() in " ".join(pages).casefold():
             return replace(candidate, email=email.strip(), phone=candidate.phone or contact["phone"]), url
     raise ValidationError("Could not confirm both the city and contact email on the official website.")
 
 
-def run(env_file: Path, target: int, checkpoint: Path, input_file: Path | None = None) -> int:
+def run(env_file: Path, target: int, checkpoint: Path, input_file: Path | None = None, retry_unfinished: bool = False) -> int:
     db = connect(load_config(env_file), env_file)
     state = json.loads(checkpoint.read_text(encoding="utf-8")) if checkpoint.exists() else {"cities": [], "candidates": []}
+    if retry_unfinished and checkpoint.exists():
+        shutil.copy2(checkpoint, checkpoint.with_name(f"{checkpoint.stem}.backup-{time_ns()}.json"))
+        state["candidates"] = [row for row in state["candidates"] if row.get("id")]
+        state["cities"] = []
+        save_state(checkpoint, state)
     seen = set()
     offset = 0
     while True:
@@ -141,12 +148,13 @@ def main() -> int:
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
     parser.add_argument("--checkpoint", type=Path, default=Path("runs/stuttgart-tuebingen.json"))
     parser.add_argument("--input", type=Path, help="Use sourced candidate JSON instead of Groq discovery.")
+    parser.add_argument("--retry-unfinished", action="store_true", help="Retry unsaved candidates, keeping a checkpoint backup.")
     args = parser.parse_args()
     if not 1 <= args.target <= 30:
         parser.error("--target must be between 1 and 30 for this pilot.")
     logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s", level=logging.ERROR)
     try:
-        return run(args.env_file, args.target, args.checkpoint, args.input)
+        return run(args.env_file, args.target, args.checkpoint, args.input, args.retry_unfinished)
     except Exception:
         logging.error("Workflow stopped. Check configuration and network; completed candidates remain in the checkpoint.")
         return 1
