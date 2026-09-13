@@ -1,8 +1,9 @@
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from agents.verifier import Assessment, VerificationAgent
+from agents.verifier import Assessment, PageContent, VerificationAgent
 from agents.discovery import Candidate
 from notaryoutreach.providers.groq import assess_formation
 
@@ -11,6 +12,15 @@ def candidate(**overrides):
     return Candidate.model_validate({
         "name": "Office A", "city": "Stuttgart", "website": "https://office.example",
         "source_url": "https://directory.example/notary", **overrides,
+    })
+
+
+def assessment_json(**overrides):
+    return json.dumps({
+        "status": "supported", "confidence": 0.95,
+        "reasoning": "The office explicitly offers UG formation.",
+        "evidence_quote": "Wir begleiten die Gründung Ihrer UG.",
+        "source_url": "https://office.example/services", **overrides,
     })
 
 
@@ -120,3 +130,76 @@ class PageReadingTests(unittest.TestCase):
         pages, errors = VerificationAgent(page_reader=Mock(return_value=" "))._read_pages(candidate())
         self.assertEqual(pages, [])
         self.assertEqual(errors[0].source_url, "https://office.example")
+
+
+class EvidenceAssessmentTests(unittest.TestCase):
+    def setUp(self):
+        self.pages = [PageContent(
+            source_url="https://office.example/services",
+            text="Willkommen. Wir begleiten die Gründung Ihrer UG. Kontaktieren Sie uns.",
+        )]
+
+    def test_supported_quote_and_requested_company_type(self):
+        for company_type in ("UG", "GmbH"):
+            quote = f"Wir begleiten die Gründung Ihrer {company_type}."
+            self.pages[0].text = quote
+            provider = Mock(return_value=assessment_json(evidence_quote=quote))
+            result = VerificationAgent(provider=provider)._assess(self.pages, company_type)
+            self.assertEqual(result.status, "supported")
+            sent = json.loads(provider.call_args.args[1])
+            self.assertEqual(sent["company_type"], company_type)
+            self.assertEqual(sent["pages"][0]["text"], self.pages[0].text)
+
+    def test_explicit_unsupported_with_source(self):
+        quote = "Wir übernehmen keine UG-Gründungen."
+        self.pages[0].text = quote
+        provider = Mock(return_value=assessment_json(
+            status="unsupported", evidence_quote=quote, reasoning="The office explicitly declines UG formation.",
+        ))
+        self.assertEqual(VerificationAgent(provider=provider)._assess(self.pages, "UG").status, "unsupported")
+
+    def test_unknown_without_quote_is_preserved(self):
+        provider = Mock(return_value=assessment_json(
+            status="unknown", evidence_quote=None, source_url=None, reasoning="No formation details.",
+        ))
+        self.assertEqual(VerificationAgent(provider=provider)._assess(self.pages, "UG").status, "unknown")
+
+    def test_unfounded_claims_are_rejected(self):
+        for changes in (
+            {"evidence_quote": None}, {"evidence_quote": "invented"},
+            {"source_url": "https://other.example/services"},
+            {"source_url": None}, {"status": "unsupported", "evidence_quote": "invented"},
+            {"status": "unknown", "source_url": None},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                VerificationAgent(provider=Mock(return_value=assessment_json(**changes)))._assess(self.pages, "UG")
+
+    def test_quote_must_match_its_specific_page(self):
+        self.pages.append(PageContent(source_url="https://office.example/other", text="Contact"))
+        with self.assertRaises(ValueError):
+            VerificationAgent(provider=Mock(return_value=assessment_json(
+                source_url="https://office.example/other",
+            )))._assess(self.pages, "UG")
+
+    def test_low_confidence_remains_unknown_with_evidence(self):
+        provider = Mock(return_value=assessment_json(confidence=0.4))
+        result = VerificationAgent(provider=provider)._assess(self.pages, "UG")
+        self.assertEqual(result.status, "unknown")
+        self.assertEqual(result.confidence, 0.4)
+        self.assertIsNotNone(result.evidence_quote)
+
+    def test_invalid_model_output_is_rejected(self):
+        for output in ("", "not json", "{}", assessment_json(confidence=2),
+                       assessment_json(confidence=True), assessment_json(reasoning=" "),
+                       assessment_json(confidence=float("nan")), assessment_json(status="yes")):
+            with self.subTest(output=output), self.assertRaises(ValueError):
+                VerificationAgent(provider=Mock(return_value=output))._assess(self.pages, "UG")
+
+    def test_invalid_request_does_not_call_provider(self):
+        provider = Mock()
+        agent = VerificationAgent(provider=provider)
+        with self.assertRaises(ValueError):
+            agent._assess([], "UG")
+        with self.assertRaises(ValueError):
+            agent._assess(self.pages, "AG")
+        provider.assert_not_called()
