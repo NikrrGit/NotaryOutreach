@@ -400,6 +400,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "groq" },
+    { name = "pydantic" },
     { name = "pypdf" },
     { name = "python-dotenv" },
     { name = "supabase" },
@@ -408,6 +409,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "groq" },
+    { name = "pydantic", specifier = ">=2,<3" },
     { name = "pypdf" },
     { name = "python-dotenv", specifier = ">=1,<2" },
     { name = "supabase", specifier = ">=2,<3" },

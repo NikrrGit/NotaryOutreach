@@ -12,6 +12,7 @@ dependencies = [
     "pypdf",
     "supabase>=2,<3",
     "python-dotenv>=1,<2",
+    "pydantic>=2,<3",
 ]
 
 [project.scripts]
@@ -20,3 +21,6 @@ notaryoutreach = "notaryoutreach:main"
 [build-system]
 requires = ["uv_build>=0.12.0,<0.13.0"]
 build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = ["notaryoutreach", "agents"]

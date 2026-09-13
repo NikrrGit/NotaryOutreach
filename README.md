@@ -50,6 +50,20 @@ uv run notaryoutreach --stage email --input verified.json > drafts.json
 
 These stages return JSON without writing to Supabase. Discovery, verification, and drafting use Groq. The email template and sender signature are defined in [email_generator.py](src/notaryoutreach/email_generator.py).
 
+## Discovery agent
+
+`agents.discovery.DiscoveryAgent` provides batched discovery for a location, company type (`UG` or `GmbH`), and result limit. It returns validated candidate records and removes duplicate offices by domain, email, or name and city. Groq is the default search provider; credentials are read from `.env` or the environment.
+
+Search attempts are bounded. If a batch fails, `DiscoveryError.candidates` contains the results from earlier batches. Contact details and service hints still require verification. Nearby locations are requested in the search prompt; an exact distance radius is not enforced.
+
+This agent is separate from the existing CLI workflow. LangGraph integration is pending.
+
+Run the offline tests:
+
+```sh
+uv run python -m unittest discover -s tests
+```
+
 ## License
 
 [MIT](LICENSE)
