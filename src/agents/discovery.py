@@ -282,3 +282,41 @@ discovered:
 Return candidates using exactly the JSON structure specified in the
 system instructions.
 """.strip()
+
+
+ # Deterministic Python helpers
+
+    @staticmethod
+    def _domain(url: str | None) -> str:
+        if not url:
+            return ""
+
+        parsed = urlparse(url)
+
+        domain = parsed.netloc.lower()
+
+        if domain.startswith("www."):
+            domain = domain[4:]
+
+        return domain
+
+    def _candidate_key(self, candidate: Candidate) -> str:
+        """
+        Generate a deterministic identity for basic deduplication.
+
+        Prefer website domain because names can vary in formatting.
+        """
+
+        domain = self._domain(candidate.website)
+
+        if domain:
+            return f"domain:{domain}"
+
+        if candidate.email:
+            return f"email:{candidate.email.lower().strip()}"
+
+        return (
+            f"name:"
+            f"{candidate.name.lower().strip()}:"
+            f"{candidate.city.lower().strip()}"
+        )
