@@ -31,7 +31,7 @@ class Candidate(BaseModel):
     company_type_hint: str | None = None 
 
 class DiscoverResult(BaseModel):
-    candidates:list[Condidate] = Field(default_factory=list)
+    candidates:list[Candidate] = Field(default_factory=list)
 
 
 class DiscoveryAgent:
@@ -67,4 +67,63 @@ class DiscoveryAgent:
         self.batch_size = batch_size
         self.max_attempts = max_attempts
 
-        
+
+    # Public API 
+
+    def discover(
+            self,
+            location : str,
+            company_type : Literal["UG", "GmbH"],
+            limit: int = 50,
+            ) -> list[Candidate]:
+        """
+        Discover unique notary candidates near a German location.
+
+        Example:
+            candidates = agent.discover(
+                location="Stuttgart",
+                company_type="UG",
+                limit=50,
+            )
+        """
+
+        if limit <= 0:
+            return []
+        candidates : dict[str, Candidate] = {}
+
+        for _ in range(self.max_attempts):
+
+            if len(candidates) >= limit:
+                break
+
+            remaining = limit - len(candidates)
+            current_batch_size = min(self.batch_size, remaining)
+
+            excluded_domains = {
+                self.domain(candidate.website)
+                for condidate in candidates.values()
+                if candidates                   
+            }
+
+            batch = self._discovery_batch(
+                location=location, 
+                company_type= company_type,
+                count=current_batch_size,
+                excluded_domains=excluded_domains,
+            )
+
+            new_candidate = 0
+
+            for candidate in batch:
+                key = self._candidate_key(candidate)
+
+                if key not in candidates:
+                    candidates[key] = candidate
+                    new_candidates+=1
+
+             # Groq is no longer finding anything new.
+            # There is no reason to keep spending API calls.
+            if new_candidates == 0:
+                break
+
+        return list(candidates.values())[:limit]
