@@ -200,3 +200,28 @@ class VerificationAgent:
             **assessment.model_dump(), candidate=candidate, company_type=company_type,
             pages_reviewed=[page.source_url for page in pages], errors=errors,
         )
+
+    def verify_candidates(
+        self, candidates: list[Candidate], company_type: CompanyType,
+    ) -> list[VerificationResult]:
+        """Return one result per candidate in input order, isolating each failure."""
+        if company_type not in ("UG", "GmbH"):
+            raise ValueError("company_type must be UG or GmbH.")
+        if not isinstance(candidates, list) or any(not isinstance(item, Candidate) for item in candidates):
+            raise TypeError("candidates must be a list of discovery Candidate objects.")
+        results: list[VerificationResult] = []
+        for candidate in candidates:
+            try:
+                results.append(self.verify(candidate, company_type))
+            except Exception as exc:
+                results.append(VerificationResult(
+                    candidate=candidate, company_type=company_type,
+                    status="unknown", confidence=0.0,
+                    reasoning="Verification could not be completed for this candidate.",
+                    evidence_quote=None, source_url=None,
+                    errors=[VerificationFailure(
+                        stage="verification",
+                        message=f"Candidate verification failed ({type(exc).__name__}).",
+                    )],
+                ))
+        return results

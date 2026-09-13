@@ -271,3 +271,42 @@ class CandidateVerificationTests(unittest.TestCase):
             agent.verify(candidate(), "AG")
         provider.assert_not_called()
         reader.assert_not_called()
+
+
+class BatchVerificationTests(unittest.TestCase):
+    def test_model_failure_does_not_stop_next_candidate(self):
+        offices = [candidate(name="Office A"), candidate(name="Office B")]
+        provider = Mock(side_effect=[TimeoutError(), assessment_json(source_url="https://office.example")])
+        reader = Mock(return_value="Wir begleiten die Gründung Ihrer UG.")
+        results = VerificationAgent(provider=provider, page_reader=reader).verify_candidates(offices, "UG")
+        self.assertEqual([result.status for result in results], ["unknown", "supported"])
+        self.assertEqual([result.candidate.name for result in results], ["Office A", "Office B"])
+        self.assertEqual(results[0].errors[0].stage, "assessment")
+        self.assertEqual(provider.call_count, 2)
+
+    def test_unexpected_candidate_failure_is_recorded(self):
+        agent = VerificationAgent(provider=Mock(), page_reader=Mock())
+        offices = [candidate(name="Office A"), candidate(name="Office B", website=None)]
+        second_result = agent.verify(offices[1], "GmbH")
+        with patch.object(agent, "verify", side_effect=[RuntimeError("private details"), second_result]):
+            results = agent.verify_candidates(offices, "GmbH")
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0].errors[0].stage, "verification")
+        self.assertNotIn("private details", results[0].model_dump_json())
+        self.assertIs(results[1], second_result)
+
+    def test_empty_batch_needs_no_services(self):
+        provider, reader = Mock(), Mock()
+        self.assertEqual(VerificationAgent(provider=provider, page_reader=reader).verify_candidates([], "UG"), [])
+        provider.assert_not_called()
+        reader.assert_not_called()
+
+    def test_invalid_batch_is_rejected_before_processing(self):
+        provider, reader = Mock(), Mock()
+        agent = VerificationAgent(provider=provider, page_reader=reader)
+        with self.assertRaises(TypeError):
+            agent.verify_candidates([candidate(), {}], "UG")
+        with self.assertRaises(ValueError):
+            agent.verify_candidates([], "AG")
+        provider.assert_not_called()
+        reader.assert_not_called()
