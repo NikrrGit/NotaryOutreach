@@ -203,3 +203,71 @@ class EvidenceAssessmentTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             agent._assess(self.pages, "AG")
         provider.assert_not_called()
+
+
+class CandidateVerificationTests(unittest.TestCase):
+    def test_supported_candidate_retains_identity_and_evidence(self):
+        office = candidate(source_url="https://office.example/services")
+        original = office.model_dump()
+        reader = Mock(side_effect=["Welcome", "Wir begleiten die Gründung Ihrer UG."])
+        agent = VerificationAgent(page_reader=reader, provider=Mock(return_value=assessment_json()))
+        result = agent.verify(office, "UG")
+        self.assertEqual(result.status, "supported")
+        self.assertEqual(result.source_url, "https://office.example/services")
+        self.assertEqual(result.company_type, "UG")
+        self.assertEqual(result.candidate.name, office.name)
+        self.assertEqual(result.errors, [])
+        self.assertEqual(len(result.pages_reviewed), 2)
+        self.assertEqual(office.model_dump(), original)
+        self.assertEqual(json.loads(result.model_dump_json())["status"], "supported")
+
+    def test_readable_service_page_can_support_result_despite_fetch_error(self):
+        reader = Mock(side_effect=[TimeoutError(), "Wir begleiten die Gründung Ihrer UG."])
+        result = VerificationAgent(page_reader=reader, provider=Mock(return_value=assessment_json())).verify(
+            candidate(source_url="https://office.example/services"), "UG",
+        )
+        self.assertEqual(result.status, "supported")
+        self.assertEqual(result.errors[0].stage, "fetch")
+
+    def test_missing_website_or_failed_fetch_stays_unknown(self):
+        for office, reader in ((candidate(website=None), Mock()), (candidate(), Mock(side_effect=TimeoutError()))):
+            provider = Mock()
+            result = VerificationAgent(page_reader=reader, provider=provider).verify(office, "UG")
+            self.assertEqual(result.status, "unknown")
+            self.assertEqual(result.confidence, 0)
+            self.assertIsNone(result.evidence_quote)
+            self.assertIsNone(result.source_url)
+            self.assertTrue(result.errors)
+            provider.assert_not_called()
+
+    def test_model_failures_and_fabricated_quotes_stay_unknown(self):
+        for output in (RuntimeError("secret API credentials"), "invalid json", assessment_json(evidence_quote="invented")):
+            provider = Mock()
+            if isinstance(output, Exception):
+                provider.side_effect = output
+            else:
+                provider.return_value = output
+            result = VerificationAgent(page_reader=Mock(return_value="Text"), provider=provider).verify(candidate(), "GmbH")
+            self.assertEqual(result.status, "unknown")
+            self.assertEqual(result.confidence, 0)
+            self.assertEqual(result.errors[0].stage, "assessment")
+            self.assertNotIn("secret", result.model_dump_json())
+
+    def test_inconclusive_assessment_is_not_an_error(self):
+        provider = Mock(return_value=assessment_json(
+            status="unknown", reasoning="Only generic service headings are present.",
+            evidence_quote=None, source_url=None,
+        ))
+        result = VerificationAgent(provider=provider, page_reader=Mock(return_value="Gesellschaftsrecht")).verify(candidate(), "UG")
+        self.assertEqual(result.status, "unknown")
+        self.assertEqual(result.errors, [])
+
+    def test_invalid_arguments_fail_before_io(self):
+        provider, reader = Mock(), Mock()
+        agent = VerificationAgent(provider=provider, page_reader=reader)
+        with self.assertRaises(TypeError):
+            agent.verify({}, "UG")
+        with self.assertRaises(ValueError):
+            agent.verify(candidate(), "AG")
+        provider.assert_not_called()
+        reader.assert_not_called()

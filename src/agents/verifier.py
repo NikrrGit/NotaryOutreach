@@ -163,3 +163,40 @@ class VerificationAgent:
                 "reasoning": "Confidence is below the verification threshold. " + assessment.reasoning,
             })
         return assessment
+
+    def verify(self, candidate: Candidate, company_type: CompanyType) -> VerificationResult:
+        """Verify one candidate without turning unavailable evidence into a rejection."""
+        if not isinstance(candidate, Candidate):
+            raise TypeError("candidate must be a discovery Candidate.")
+        if company_type not in ("UG", "GmbH"):
+            raise ValueError("company_type must be UG or GmbH.")
+
+        pages: list[PageContent] = []
+        errors: list[VerificationFailure] = []
+        assessment = Assessment(
+            status="unknown", confidence=0.0,
+            reasoning="No readable official website evidence is available.",
+            evidence_quote=None, source_url=None,
+        )
+        try:
+            pages, errors = self._read_pages(candidate)
+        except Exception as exc:
+            errors.append(VerificationFailure(
+                stage="fetch", source_url=candidate.website,
+                message=f"Website reading failed ({type(exc).__name__}).",
+            ))
+        if pages:
+            try:
+                assessment = self._assess(pages, company_type)
+            except Exception as exc:
+                errors.append(VerificationFailure(
+                    stage="assessment",
+                    message=f"Could not obtain a valid, sourced assessment ({type(exc).__name__}).",
+                ))
+                assessment = assessment.model_copy(update={
+                    "reasoning": "The assessment failed or could not be linked to valid source evidence.",
+                })
+        return VerificationResult(
+            **assessment.model_dump(), candidate=candidate, company_type=company_type,
+            pages_reviewed=[page.source_url for page in pages], errors=errors,
+        )
