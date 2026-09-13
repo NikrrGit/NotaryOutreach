@@ -3,7 +3,15 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from agents.verifier import Assessment, VerificationAgent
+from agents.discovery import Candidate
 from notaryoutreach.providers.groq import assess_formation
+
+
+def candidate(**overrides):
+    return Candidate.model_validate({
+        "name": "Office A", "city": "Stuttgart", "website": "https://office.example",
+        "source_url": "https://directory.example/notary", **overrides,
+    })
 
 
 class ConfigurationTests(unittest.TestCase):
@@ -57,3 +65,58 @@ class AssessmentProviderTests(unittest.TestCase):
                 assess_formation("system", "input", {}, env_file="custom.env")
             self.assertEqual(str(build.call_args.args[0]), "custom.env")
             build.return_value.__exit__.assert_called_once()
+
+
+class PageReadingTests(unittest.TestCase):
+    def test_reads_homepage_and_service_links_only_on_office_site(self):
+        def read(url, links):
+            if url == "https://office.example":
+                links.extend([
+                    "https://office.example/gesellschaftsrecht",
+                    "https://other.example/gesellschaftsrecht",
+                    "https://user:password@office.example/private",
+                    "javascript:alert(1)", "https://office.example#top",
+                ])
+            return "Website text"
+
+        reader = Mock(side_effect=read)
+        pages, errors = VerificationAgent(page_reader=reader)._read_pages(candidate())
+        self.assertEqual([page.source_url for page in pages], [
+            "https://office.example", "https://office.example/gesellschaftsrecht",
+        ])
+        self.assertEqual(errors, [])
+        self.assertEqual(reader.call_count, 2)
+
+    def test_official_source_survives_homepage_failure(self):
+        reader = Mock(side_effect=[TimeoutError("secret"), "We form companies."])
+        pages, errors = VerificationAgent(page_reader=reader)._read_pages(
+            candidate(source_url="https://www.office.example/services"),
+        )
+        self.assertEqual(pages[0].source_url, "https://www.office.example/services")
+        self.assertEqual(errors[0].stage, "fetch")
+        self.assertNotIn("secret", errors[0].message)
+
+    def test_limits_fetch_attempts_including_failures(self):
+        def read(url, links):
+            links.extend(f"https://office.example/service/{number}" for number in range(20))
+            if url.endswith("/1"):
+                raise TimeoutError()
+            return "Text"
+
+        reader = Mock(side_effect=read)
+        pages, errors = VerificationAgent(page_reader=reader, max_pages=3)._read_pages(candidate())
+        self.assertEqual(reader.call_count, 3)
+        self.assertEqual(len(pages), 2)
+        self.assertEqual(len(errors), 1)
+
+    def test_missing_website_does_not_use_directory(self):
+        reader = Mock()
+        pages, errors = VerificationAgent(page_reader=reader)._read_pages(candidate(website=None))
+        self.assertEqual(pages, [])
+        self.assertEqual(errors[0].stage, "fetch")
+        reader.assert_not_called()
+
+    def test_blank_page_is_a_failure(self):
+        pages, errors = VerificationAgent(page_reader=Mock(return_value=" "))._read_pages(candidate())
+        self.assertEqual(pages, [])
+        self.assertEqual(errors[0].source_url, "https://office.example")

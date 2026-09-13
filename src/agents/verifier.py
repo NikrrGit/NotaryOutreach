@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from functools import partial
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -73,3 +74,46 @@ class VerificationAgent:
         self.page_reader = page_reader if page_reader is not None else fetch_page_text
         self.max_pages = max_pages
         self.minimum_confidence = float(minimum_confidence)
+
+    def _read_pages(
+        self, candidate: Candidate,
+    ) -> tuple[list[PageContent], list[VerificationFailure]]:
+        """Read the homepage and same-office sources, retaining individual errors."""
+        pages: list[PageContent] = []
+        errors: list[VerificationFailure] = []
+        if not candidate.website:
+            return pages, [VerificationFailure(stage="fetch", message="No official website supplied.")]
+
+        official_host = urlsplit(candidate.website).hostname.casefold().removeprefix("www.").rstrip(".")
+        pending = [candidate.website, candidate.source_url]
+        visited: set[str] = set()
+        attempts = 0
+        while pending and attempts < self.max_pages:
+            raw_url = pending.pop(0)
+            try:
+                Candidate.validate_url(raw_url)
+                parsed = urlsplit(raw_url)
+                host = parsed.hostname.casefold().removeprefix("www.").rstrip(".")
+                if host != official_host:
+                    continue
+                url = parsed._replace(fragment="").geturl()
+                key = parsed._replace(fragment="", path=parsed.path.rstrip("/")).geturl()
+            except (ValueError, AttributeError, TypeError):
+                continue
+            if key in visited:
+                continue
+            visited.add(key)
+            attempts += 1
+            links: list[str] = []
+            try:
+                text = self.page_reader(url, links)
+                if not isinstance(text, str) or not text.strip():
+                    raise ValueError("No readable text.")
+                pages.append(PageContent(source_url=url, text=text.strip()))
+            except Exception as exc:
+                errors.append(VerificationFailure(
+                    stage="fetch", source_url=url,
+                    message=f"Could not read page ({type(exc).__name__}).",
+                ))
+            pending.extend(links)
+        return pages, errors
