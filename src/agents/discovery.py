@@ -104,7 +104,7 @@ class DiscoveryAgent:
                 for condidate in candidates.values()
                 if candidates                   
             }
-
+ 
             batch = self._discovery_batch(
                 location=location, 
                 company_type= company_type,
@@ -127,3 +127,66 @@ class DiscoveryAgent:
                 break
 
         return list(candidates.values())[:limit]
+    
+
+    # Groq Interaction
+    def _discover_batch(
+        self,
+        location: str,
+        company_type: str,
+        count: int,
+        excluded_domains: set[str],
+    ) -> list[Candidate]:
+
+        prompt = self._build_prompt(
+            location=location,
+            company_type=company_type,
+            count=count,
+            excluded_domains=excluded_domains,
+        )
+
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": self._system_prompt(),
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+
+            # Compound can decide when to search the web
+            # and when to visit a website.
+            compound_custom={
+                "tools": {
+                    "enabled_tools": [
+                        "web_search",
+                        "visit_website",
+                    ]
+                }
+            },
+
+            # Compound supports JSON object mode.
+            response_format={
+                "type": "json_object",
+            },
+        )
+
+        content = response.choices[0].message.content
+
+        if not content:
+            return []
+
+        try:
+            raw_data = json.loads(content)
+            result = DiscoveryResult.model_validate(raw_data)
+
+            return result.candidates
+
+        except (json.JSONDecodeError, ValidationError) as exc:
+            raise RuntimeError(
+                "Groq returned an invalid discovery response."
+            ) from exc
