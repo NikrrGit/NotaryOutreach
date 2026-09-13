@@ -190,3 +190,95 @@ class DiscoveryAgent:
             raise RuntimeError(
                 "Groq returned an invalid discovery response."
             ) from exc
+
+
+
+    # Prompts
+
+    @staticmethod
+    def _system_prompt() -> str:
+        return """
+You are a research agent that discovers German notaries.
+
+Your only responsibility is DISCOVERY.
+
+You must use live web information.
+
+Rules:
+
+1. Find real Notare / Notarinnen in Germany.
+2. Prefer official notary websites.
+3. Public professional contact information only.
+4. Never invent names, websites, emails, phone numbers or services.
+5. Every candidate MUST have a source_url.
+6. If a value cannot be verified, return null.
+7. Do not decide definitively whether the candidate handles UG or GmbH
+   formation. Another agent will verify that.
+8. company_type_hint may contain a short indication such as
+   "Gesellschaftsrecht mentioned" if discovered.
+9. Return ONLY valid JSON.
+
+Required JSON shape:
+
+{
+    "candidates": [
+        {
+            "name": "string",
+            "city": "string",
+            "website": "string or null",
+            "email": "string or null",
+            "phone": "string or null",
+            "source_url": "string",
+            "company_type_hint": "string or null"
+        }
+    ]
+}
+""".strip()
+
+    @staticmethod
+    def _build_prompt(
+        location: str,
+        company_type: str,
+        count: int,
+        excluded_domains: set[str],
+    ) -> str:
+
+        excluded = (
+            "\n".join(sorted(excluded_domains))
+            if excluded_domains
+            else "None"
+        )
+
+        return f"""
+Find up to {count} additional notaries around:
+
+Location: {location}, Germany
+Company formation type of interest: {company_type}
+
+Search the given city and reasonable nearby locations.
+
+We are eventually looking for notaries who may be able to assist with
+forming a {company_type}, but at this stage only discover candidates.
+
+Useful search concepts include:
+
+- Notar {location}
+- Notar Gesellschaftsrecht {location}
+- Notar Unternehmensgründung {location}
+- Notar GmbH Gründung {location}
+- Notar UG Gründung {location}
+
+Prefer:
+
+1. official notary websites;
+2. official/professional notary sources;
+3. public professional contact information.
+
+Do NOT return candidates from these domains because they were already
+discovered:
+
+{excluded}
+
+Return candidates using exactly the JSON structure specified in the
+system instructions.
+""".strip()
