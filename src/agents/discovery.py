@@ -33,4 +33,38 @@ class Candidate(BaseModel):
 class DiscoverResult(BaseModel):
     candidates:list[Condidate] = Field(default_factory=list)
 
-    
+
+class DiscoveryAgent:
+    """
+    Finds potential German notaries using Groq Compound.
+
+    Responsibilities:
+        - Search the live web.
+        - Prefer official notary websites.
+        - Collect basic contact information.
+        - Return structured candidate records.
+
+    NOT responsible for:
+        - Determining UG/GmbH compatibility.
+        - Writing outreach emails.
+        - Sending emails.
+    """
+
+    def __init__(
+            self,
+            client: Groq | None = None,
+            model: str =  "groq/compound",
+            batch_size: int = 10,
+            max_attempts : int = 10
+    ) -> None:
+        self.client = client or Groq(
+            api_key=os.environ["GROQ_API_KEY"],
+            default_headers={
+                "Groq_Model_Version": "latest",
+            },
+        )
+        self.model = model
+        self.batch_size = batch_size
+        self.max_attempts = max_attempts
+
+        
