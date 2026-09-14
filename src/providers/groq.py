@@ -182,3 +182,64 @@ If the information cannot be confirmed, say so explicitly.
 
         return self._parse_json(content)
     )
+
+    # Normal Reasoning / Generation
+
+    def generate(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        json_mode: bool = True,
+        model: str | None = None,
+        temperature: float = 0.0,
+    ) -> dict[str, Any] | str:
+        """
+        Call a normal Groq-hosted model without web tools.
+
+        Intended for:
+            - verification reasoning after evidence is collected
+            - email generation
+            - evaluator agent
+            - classification
+
+        Use this when live web access is NOT required.
+        """
+
+        selected_model = model or self.reasoning_model
+
+        request: dict[str, Any] = {
+            "model": selected_model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": system_prompt,
+                },
+                {
+                    "role": "user",
+                    "content": user_prompt,
+                },
+            ],
+            "temperature": temperature,
+        }
+
+        if json_mode:
+            request["response_format"] = {
+                "type": "json_object",
+            }
+
+        response = self.client.chat.completions.create(**request)
+
+        content = response.choices[0].message.content
+
+        if not content:
+            raise RuntimeError(
+                f"Groq model {selected_model} returned an empty response."
+            )
+
+        if not json_mode:
+            return content
+
+        return self._parse_json(content)
+
+
