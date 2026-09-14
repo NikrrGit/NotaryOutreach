@@ -107,3 +107,78 @@ class GroqProvider:
 
             return self._parse_json(content)
         )
+
+    # Website-specific reseach
+
+    def inspect_website(
+              self,
+              *,
+              url: str,
+        instruction: str,
+        json_mode: bool = True,
+    ) -> dict[str, Any] | str:
+        """
+        Ask Compound to inspect a specific website.
+
+        Intended mainly for verification.
+
+        Example:
+            provider.inspect_website(
+                url=candidate.website,
+                instruction=(
+                    "Determine whether this notary handles "
+                    "UG or GmbH company formation."
+                ),
+            )
+        """
+
+        prompt = f"""
+Visit this website:
+
+{url}
+
+Task:
+
+{instruction}
+
+Use only information you can verify from the website.
+
+If the information cannot be confirmed, say so explicitly.
+""".strip()
+
+        request: dict[str, Any] = {
+            "model": self.compound_model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            "compound_custom": {
+                "tools": {
+                    "enabled_tools": [
+                        "visit_website",
+                    ]
+                }
+            },
+        }
+
+        if json_mode:
+            request["response_format"] = {
+                "type": "json_object",
+            }
+
+        response = self.client.chat.completions.create(**request)
+
+        content = response.choices[0].message.content
+
+        if not content:
+            raise RuntimeError(
+                f"Groq returned an empty response for {url}."
+            )
+
+        if not json_mode:
+            return content
+
+        return self._parse_json(content)
+    )
