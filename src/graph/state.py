@@ -3,34 +3,34 @@ from __future__ import annotations
 import operator
 from typing import Annotated, Literal, TypedDict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from src.models.candidate import Candidate
-from src.models.verification import VerificationResult
-from src.models.email import EmailDraft
-from src.models.evaluation import EvaluationResult
+from agents.discovery import Candidate
+from agents.verifier import VerificationResult
 
 
 CompanyType = Literal["UG", "GmbH"]
 
-# Workflwo outpot
+# Search configuration
 
 class SearchSettings(BaseModel):
     """
-    User provide configuration for any notary search job
+    User-provided configuration for a notary search job.
     """
 
-    location:str = Field(min_length=1)
-    Company_type : CompanyType
-    target_count : int = Field(default=20, ge=1,le=100)
+    model_config = ConfigDict(str_strip_whitespace=True)
 
-    radius_km : int = Field(default=50, ge=1, le=200)
-    language: str = Field(default='de')
+    location: str = Field(min_length=1)
+    company_type: CompanyType
+    target_count: int = Field(default=20, ge=1, le=100, strict=True)
+
+    radius_km: int = Field(default=50, ge=1, le=200, strict=True)
+    language: str = Field(default="de", min_length=1)
 
 
 # Error state
 
-class WorkFlow(BaseModel):
+class WorkflowError(BaseModel):
     """
     Structured error recorded during workflow execution.
 
@@ -41,7 +41,7 @@ class WorkFlow(BaseModel):
     node: str
     message: str
 
-    candidate_id : str | None =  None 
+    candidate_id: str | None = None
     retryable: bool = False
 
 
@@ -53,12 +53,12 @@ class RetryCounts(TypedDict):
     """
 
     discovery: int
-    verification : int
+    verification: int
     email_generation: int
-    evaluation : int
+    evaluation: int
 
 
-# Main Langrgapgh state
+# Main LangGraph state
 
 class WorkflowState(TypedDict):
     """
@@ -67,11 +67,11 @@ class WorkflowState(TypedDict):
     Every node receives this state and returns ONLY the fields
     it wants to update.
     """
-    # Search config 
+    # Search config
     settings: SearchSettings
 
-    # Discovery 
-    candidates = Annotated[
+    # Discovery
+    candidates: Annotated[
         list[Candidate],
         operator.add,
     ]
