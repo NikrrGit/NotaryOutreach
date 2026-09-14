@@ -25,10 +25,25 @@ class SearchSettings(BaseModel):
     target_count : int = Field(default=20, ge=1,le=100)
 
     radius_km : int = Field(default=50, ge=1, le=200)
-    langauge: str = Field(default='de')
+    language: str = Field(default='de')
 
 
 # Error state
 
-class WorkFlow
+class WorkFlow(BaseModel):
+    """
+    Structured error recorded during workflow execution.
+
+    Errors are stored in state instead of immediately terminating
+    the entire workflow.
+    """
+
+    node: str
+    message: str
+
+    candidate_id : str | None =  None 
+    retryable: bool = False
+
+    
+
 
