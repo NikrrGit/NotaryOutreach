@@ -44,3 +44,66 @@ class GroqProvider:
         )
         self.compound.model = compound_model
         self,reasoning_model = reasoning_model
+
+    # Live web reseach
+    def search_web(
+            self,
+            *,
+            system_prompt: str,
+            user_prompt: str,
+            json_mode: bool = True,
+        ) -> dict[str, Any] | str:
+            """
+            Perform live web research using Groq Compound.
+
+            Compound is allowed to:
+                - search the web
+                - visit public websites
+
+            Intended for:
+                - discovery
+                - source gathering
+                - current website/contact research
+            """
+
+            request: dict[str, Any] = {
+                "model": self.compound_model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": system_prompt,
+                    },
+                    {
+                        "role": "user",
+                        "content": user_prompt,
+                    },
+                ],
+                "compound_custom": {
+                    "tools": {
+                        "enabled_tools": [
+                            "web_search",
+                            "visit_website",
+                        ]
+                    }
+                },
+            }
+
+            if json_mode:
+                request["response_format"] = {
+                    "type": "json_object",
+                }
+
+            response = self.client.chat.completions.create(**request)
+
+            content = response.choices[0].message.content
+
+            if not content:
+                raise RuntimeError(
+                    "Groq returned an empty response."
+                )
+
+            if not json_mode:
+                return content
+
+            return self._parse_json(content)
+        )
