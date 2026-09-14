@@ -242,4 +242,28 @@ If the information cannot be confirmed, say so explicitly.
 
         return self._parse_json(content)
 
+    # Internal Helper
+    @staticmethod
+    def _parse_json(content: str) -> dict[str, Any]:
+        """
+        Convert Groq JSON output into a Python dictionary.
+
+        Pydantic validation should happen in the agent/model layer,
+        because the provider should not know domain-specific schemas.
+        """
+
+        try:
+            parsed = json.loads(content)
+
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                "Groq returned invalid JSON."
+            ) from exc
+
+        if not isinstance(parsed, dict):
+            raise RuntimeError(
+                "Expected Groq to return a JSON object."
+            )
+
+        return parsed
 
