@@ -106,7 +106,6 @@ class GroqProvider:
                 return content
 
             return self._parse_json(content)
-        )
 
     # Website-specific reseach
 
@@ -181,7 +180,6 @@ If the information cannot be confirmed, say so explicitly.
             return content
 
         return self._parse_json(content)
-    )
 
     # Normal Reasoning / Generation
 
