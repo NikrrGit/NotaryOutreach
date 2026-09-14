@@ -58,3 +58,35 @@ class RetryCounts(TypedDict):
     evaluation : int
 
 
+# Main Langrgapgh state
+
+class WorkflowState(TypedDict):
+    """
+    Shared state passed between LangGraph nodes.
+
+    Every node receives this state and returns ONLY the fields
+    it wants to update.
+    """
+    # Search config 
+    settings: SearchSettings
+
+    # Discovery 
+    candidates = Annotated[
+        list[Candidate],
+        operator.add,
+    ]
+
+    # Verification
+    verification_results: Annotated[
+        list[VerificationResult],
+        operator.add,
+    ]
+
+    # Errors
+    errors: Annotated[
+        list[WorkflowError],
+        operator.add,
+    ]
+
+    # Retry Tracking
+    retry_counts: RetryCounts
