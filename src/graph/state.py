@@ -44,6 +44,17 @@ class WorkFlow(BaseModel):
     candidate_id : str | None =  None 
     retryable: bool = False
 
-    
+
+# Retry State
+
+class RetryCounts(TypedDict):
+    """
+    Number of retries already performed by each workflow stage.
+    """
+
+    discovery: int
+    verification : int
+    email_generation: int
+    evaluation : int
 
 
