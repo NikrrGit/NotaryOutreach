@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
+from typing import Any, TypeVar
 
 from groq import Groq
+from pydantic import BaseModel
+
+ResponseModel = TypeVar("ResponseModel", bound=BaseModel)
+
 
 class GroqProvider:
     """
@@ -23,96 +27,87 @@ class GroqProvider:
     """
 
     def __init__(
-            self,
-            api_key: str | None = None,
-            compound_model : str = "groq/compound",
-            reasoning_model : str ="opeai/gpt-oss- 20b",
-            ) -> None:
-
+        self,
+        api_key: str | None = None,
+        compound_model: str = "groq/compound",
+        reasoning_model: str = "openai/gpt-oss-20b",
+    ) -> None:
         resolved_api_key = api_key or os.getenv("GROQ_API_KEY")
-
-        if not resolved_api_key:
+        if not resolved_api_key or not resolved_api_key.strip():
             raise ValueError(
                 "GROQ_API_KEY is missing. "
-                "Set it in the environment or pass api_key explicitely."
+                "Set it in the environment or pass api_key explicitly."
             )
-        self.client= Groq(
+        self.client = Groq(
             api_key=resolved_api_key,
-            default_headers={
-                "Groq-Model-Version": "latest",
-            },
+            default_headers={"Groq-Model-Version": "latest"},
         )
-        self.compound.model = compound_model
-        self,reasoning_model = reasoning_model
+        self.compound_model = compound_model
+        self.reasoning_model = reasoning_model
 
-    # Live web reseach
+    # Live web research
     def search_web(
-            self,
-            *,
-            system_prompt: str,
-            user_prompt: str,
-            json_mode: bool = True,
-        ) -> dict[str, Any] | str:
-            """
-            Perform live web research using Groq Compound.
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        json_mode: bool = True,
+    ) -> dict[str, Any] | str:
+        """
+        Perform live web research using Groq Compound.
 
-            Compound is allowed to:
-                - search the web
-                - visit public websites
+        Compound is allowed to:
+            - search the web
+            - visit public websites
 
-            Intended for:
-                - discovery
-                - source gathering
-                - current website/contact research
-            """
+        Intended for:
+            - discovery
+            - source gathering
+            - current website/contact research
+        """
 
-            request: dict[str, Any] = {
-                "model": self.compound_model,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": system_prompt,
-                    },
-                    {
-                        "role": "user",
-                        "content": user_prompt,
-                    },
-                ],
-                "compound_custom": {
-                    "tools": {
-                        "enabled_tools": [
-                            "web_search",
-                            "visit_website",
-                        ]
-                    }
+        request: dict[str, Any] = {
+            "model": self.compound_model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": system_prompt,
                 },
+                {
+                    "role": "user",
+                    "content": user_prompt,
+                },
+            ],
+            "compound_custom": {
+                "tools": {
+                    "enabled_tools": [
+                        "web_search",
+                        "visit_website",
+                    ]
+                }
+            },
+        }
+
+        if json_mode:
+            request["response_format"] = {
+                "type": "json_object",
             }
 
-            if json_mode:
-                request["response_format"] = {
-                    "type": "json_object",
-                }
+        response = self.client.chat.completions.create(**request)
 
-            response = self.client.chat.completions.create(**request)
+        content = self._response_content(response)
 
-            content = response.choices[0].message.content
+        if not json_mode:
+            return content
 
-            if not content:
-                raise RuntimeError(
-                    "Groq returned an empty response."
-                )
+        return self._parse_json(content)
 
-            if not json_mode:
-                return content
-
-            return self._parse_json(content)
-
-    # Website-specific reseach
+    # Website-specific research
 
     def inspect_website(
-              self,
-              *,
-              url: str,
+        self,
+        *,
+        url: str,
         instruction: str,
         json_mode: bool = True,
     ) -> dict[str, Any] | str:
@@ -169,12 +164,7 @@ If the information cannot be confirmed, say so explicitly.
 
         response = self.client.chat.completions.create(**request)
 
-        content = response.choices[0].message.content
-
-        if not content:
-            raise RuntimeError(
-                f"Groq returned an empty response for {url}."
-            )
+        content = self._response_content(response)
 
         if not json_mode:
             return content
@@ -228,17 +218,54 @@ If the information cannot be confirmed, say so explicitly.
 
         response = self.client.chat.completions.create(**request)
 
-        content = response.choices[0].message.content
-
-        if not content:
-            raise RuntimeError(
-                f"Groq model {selected_model} returned an empty response."
-            )
+        content = self._response_content(response)
 
         if not json_mode:
             return content
 
         return self._parse_json(content)
+
+    def generate_structured(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: type[ResponseModel],
+    ) -> ResponseModel:
+        """Request a schema-shaped response and validate it with the supplied model.
+
+        Best-effort schema mode preserves optional fields and defaults. Local
+        Pydantic validation rejects malformed or nonconforming responses.
+        """
+        if not isinstance(response_model, type) or not issubclass(response_model, BaseModel):
+            raise TypeError("response_model must be a Pydantic BaseModel subclass.")
+        response = self.client.chat.completions.create(
+            model=self.reasoning_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.0,
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "structured_response",
+                    "strict": False,
+                    "schema": response_model.model_json_schema(),
+                },
+            },
+        )
+        return response_model.model_validate_json(self._response_content(response))
+
+    @staticmethod
+    def _response_content(response: Any) -> str:
+        """Reject incomplete responses before parsing or returning their content."""
+        if not response.choices or response.choices[0].finish_reason != "stop":
+            raise RuntimeError("Groq did not complete the response.")
+        content = response.choices[0].message.content
+        if not content or not content.strip():
+            raise RuntimeError("Groq returned an empty response.")
+        return content
 
     # Internal Helper
     @staticmethod
@@ -246,8 +273,8 @@ If the information cannot be confirmed, say so explicitly.
         """
         Convert Groq JSON output into a Python dictionary.
 
-        Pydantic validation should happen in the agent/model layer,
-        because the provider should not know domain-specific schemas.
+        Domain-specific validation is handled by the supplied response model
+        when using generate_structured().
         """
 
         try:
