@@ -66,7 +66,34 @@ Each result includes the candidate, status (`supported`, `unsupported`, or `unkn
 
 By default, the agent attempts up to four pages per office and requires confidence of at least 0.8 for a definite result. Failed pages and model responses are recorded per candidate, and batch processing continues. Groq credentials come from `.env` or the environment. The agent is separate from the existing CLI and awaits LangGraph integration.
 
-Run the offline tests for both agents:
+## Email writer handoff
+
+`EmailWriter.write_verified()` accepts a `VerificationResult` and returns an
+`EmailDraft`. It rejects results unless their status is `supported`, their
+reasoning and evidence quote are nonempty, and their evidence source is a valid
+HTTP(S) URL. The verifier remains responsible for matching evidence and applying
+its configured confidence threshold.
+
+With an initialized verifier, candidate, and provider implementing
+`generate_structured()`:
+
+```python
+from agents.email_writer import EmailWriter
+
+result = verifier.verify(candidate, "UG")
+if result.status == "supported":
+    draft = EmailWriter(provider).write_verified(result, sender_name="Alex")
+```
+
+`EmailWriterInput.from_verification()` exposes the same validated conversion
+separately. It uses the verification source and requested company type, rather
+than discovery hints. Discovery contact details are carried through without
+additional contact verification; missing email addresses do not prevent drafting.
+The existing `writer(data)` method remains a low-level entry point for callers
+that already have verified input. Drafts are not sent or persisted by this handoff;
+LangGraph integration remains pending.
+
+Run the offline tests:
 
 ```sh
 uv run python -m unittest discover -s tests

@@ -4,6 +4,9 @@ from typing import Protocol
 
 from pydantic import BaseModel, Field
 
+from .discovery import Candidate
+from .verifier import VerificationResult
+
 
 class EmailWriterProvider(Protocol):
     """Minimal provider contract required by the email writer."""
@@ -40,6 +43,42 @@ class EmailWriterInput(BaseModel):
     sender_name: str | None = None
     company_name: str | None = None
 
+    @classmethod
+    def from_verification(
+        cls,
+        verification: VerificationResult,
+        *,
+        sender_name: str | None = None,
+        company_name: str | None = None,
+    ) -> EmailWriterInput:
+        """Map a supported verifier result into drafting input.
+
+        The verifier owns evidence matching and the confidence threshold.
+        Discovery contact details are carried through, not reverified here.
+        """
+        if not isinstance(verification, VerificationResult):
+            raise TypeError("verification must be a VerificationResult.")
+        if verification.status != "supported":
+            raise ValueError("Cannot generate email unless verification is supported.")
+        if not verification.reasoning.strip():
+            raise ValueError("Cannot generate email without a verification reason.")
+        if not verification.evidence_quote or not verification.evidence_quote.strip():
+            raise ValueError("Cannot generate email without source evidence.")
+        if not verification.source_url or not verification.source_url.strip():
+            raise ValueError("Cannot generate email without an evidence source URL.")
+        Candidate.validate_url(verification.source_url)
+        return cls(
+            notary_name=verification.candidate.name,
+            city=verification.candidate.city,
+            email=verification.candidate.email,
+            company_type=verification.company_type,
+            verification_reason=verification.reasoning,
+            evidence=verification.evidence_quote,
+            source_url=verification.source_url,
+            sender_name=sender_name,
+            company_name=company_name,
+        )
+
 
 class EmailWriter:
     """Generate German appointment-request drafts from verified information.
@@ -50,6 +89,19 @@ class EmailWriter:
 
     def __init__(self, provider: EmailWriterProvider) -> None:
         self.provider = provider
+
+    def write_verified(
+        self,
+        verification: VerificationResult,
+        *,
+        sender_name: str | None = None,
+        company_name: str | None = None,
+    ) -> EmailDraft:
+        """Draft for a supported result; reject ineligible results before calling AI."""
+        data = EmailWriterInput.from_verification(
+            verification, sender_name=sender_name, company_name=company_name,
+        )
+        return self.writer(data)
 
     def writer(self, data: EmailWriterInput) -> EmailDraft:
         """Generate one email draft from verified candidate information."""
