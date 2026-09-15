@@ -28,4 +28,22 @@ class EmailDraft(BaseModel):
       subject: str = Field(min_length=1, max_length=150)
       body: str = Field(min_length=1, max_length= 2000)
       language : str = "de"
-      personalisation_used: str | None = None
+      personalisation_used: str | None = None 
+
+class EmailWriterInput(BaseModel):
+      """
+      Only verified information is allowed into the writer
+      This prevents writer from inventing facts
+      """
+
+      notary_name : str
+      city: str 
+      email: str | None = None
+      company_type : str 
+
+      verification_reason : str 
+      evidence : str
+      source_url : str
+      
+      sender_name : str | None = None 
+      company_name : str | None = None 
