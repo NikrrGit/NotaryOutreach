@@ -22,7 +22,7 @@ class EvaluatorProvider(Protocol):
     ) -> BaseModel:
         ...
 
-    class EvolutionResult(BaseModel):
+    class EvoluationResult(BaseModel):
         """
         Structured result returned by the evaluator
         """
@@ -38,4 +38,21 @@ class EvaluatorProvider(Protocol):
         issues: list[str] = Field(defualt_factory=list)
 
 
+    class EvaluatorInput(BaseModel):
+        """
+            Everything the evaluator needs to compare the generated
+            email against the verified source information.
+        """
+
+        company_type: str
+
+        notary_name: str
+        city: str
+
+        verification_reason: str
+        evidence: str
+        source_url: str
+
+        email_subject: str
+        email_body: str
 
