@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import operator
 from typing import Annotated, Literal, TypedDict
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from agents.discovery import Candidate
+from agents.email_writer import EmailDraft
 from agents.verifier import VerificationResult
 
 
@@ -26,6 +28,35 @@ class SearchSettings(BaseModel):
 
     radius_km: int = Field(default=50, ge=1, le=200, strict=True)
     language: str = Field(default="de", min_length=1)
+
+
+# Draft and evaluation state
+
+class CandidateEmailDraft(BaseModel):
+    """A draft linked to its candidate, with an ID for evaluation references.
+
+    Store each regenerated draft as a new record so evaluations remain tied
+    to the exact version they reviewed.
+    """
+
+    draft_id: str = Field(default_factory=lambda: str(uuid4()), min_length=1)
+    candidate: Candidate
+    draft: EmailDraft
+
+
+class EvaluationResult(BaseModel):
+    """Quality assessment of a stored draft, not human approval to send it.
+
+    draft_id references CandidateEmailDraft.draft_id, which also identifies
+    the associated candidate. The workflow must enforce that reference.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    draft_id: str = Field(min_length=1)
+    passed: bool = Field(strict=True)
+    reasoning: str = Field(min_length=1)
+    issues: list[str] = Field(default_factory=list)
 
 
 # Error state
@@ -79,6 +110,18 @@ class WorkflowState(TypedDict):
     # Verification
     verification_results: Annotated[
         list[VerificationResult],
+        operator.add,
+    ]
+
+    # Draft history: append a new record for each generated version.
+    email_drafts: Annotated[
+        list[CandidateEmailDraft],
+        operator.add,
+    ]
+
+    # Evaluations reference a specific draft version and its candidate.
+    evaluations: Annotated[
+        list[EvaluationResult],
         operator.add,
     ]
 
