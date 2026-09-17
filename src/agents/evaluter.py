@@ -79,3 +79,19 @@ class EvaluatorProvider(Protocol):
     ) -> None:
         self.provider = provider
         self.pass_threshold = pass_threshold
+
+    def evaluate(self, data: EvaluatorInput) -> EvoluationResult:
+        """
+        Evaluate one generate email draft
+        """
+
+        result = self.provider.generate_structured(
+            system_prompt =self._system_prompt(),
+            user_prompt=self._build_prompt(data),
+            response_model= self.EvoluationResult,
+        )
+
+        if not isinstance(result, self.EvoluationResult):
+            result = self.EvoluationResult.model_validate(result)
+
+        return self._apply_pass_rules(result)
