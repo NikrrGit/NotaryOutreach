@@ -56,3 +56,26 @@ class EvaluatorProvider(Protocol):
         email_subject: str
         email_body: str
 
+    class EmailEvaluator:
+        """
+        Evaluates an email draft before it reaches human review.
+
+        Checks:
+            1. Does the email request an appointment?
+            2. Does it use the correct company type?
+            3. Are factual claims supported by verified evidence?
+
+        NOT responsible for:
+            - Discovering notaries.
+            - Verifying notaries.
+            - Rewriting emails.
+            - Sending emails.
+         """
+
+    def __init__(
+        self,
+        provider: EvaluatorProvider,
+        pass_threshold: float = 0.85,
+    ) -> None:
+        self.provider = provider
+        self.pass_threshold = pass_threshold
