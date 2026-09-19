@@ -2,6 +2,58 @@
 
 A Python CLI for finding notaries and preparing German email enquiries about UG formation. It checks official websites for relevant services, removes duplicate contacts, and saves drafts to Supabase for review in Lovable. It does not send emails.
 
+## Architecture
+
+The existing CLI workflow runs independently of the newer agent nodes. The agent
+flow below shows their intended execution order; LangGraph assembly, routing,
+and durable graph checkpoints are still pending. The evaluation node accepts an
+injected callable because the evaluator implementation is incomplete.
+
+```mermaid
+flowchart TB
+    subgraph current["Existing CLI workflow — src/notaryoutreach"]
+        CLI["CLI / workflow.py"] --> Search["Discover and deduplicate"]
+        Search --> Check["Verify contacts and formation services"]
+        Check --> Draft["Generate German email drafts"]
+        CLI --- Checkpoint["Local JSON checkpoint"]
+    end
+
+    subgraph agents["Agent node flow — src/graph/nodes.py"]
+        Settings["Search settings"] --> Discover["DiscoveryAgent"]
+        Discover --> Verify["VerificationAgent"]
+        Verify --> Gate{"Supported with evidence?"}
+        Gate -->|Yes| Write["EmailWriter"]
+        Gate -->|No| Skip["Retain verification result; no draft"]
+        Write --> Evaluate["Evaluation callable — implementation pending"]
+        Evaluate --> Pass{"Evaluation passed?"}
+        Pass -->|Yes| Persist["SupabaseDraftStore"]
+        Pass -->|No| Hold["Retain evaluation; do not persist draft"]
+        State["WorkflowState: candidates, verification, drafts, evaluations, errors"]
+        State -.- Discover
+        State -.- Verify
+        State -.- Write
+        State -.- Evaluate
+        State -.- Persist
+    end
+
+    Draft --> DB[("Supabase: pending drafts")]
+    Persist --> DB
+    DB --> Review["Human review in Lovable — maintained separately"]
+
+    Groq["Groq: web search and model generation"] -.-> Search
+    Groq -.-> Check
+    Groq -.-> Draft
+    Groq -.-> Discover
+    Groq -.-> Verify
+    Groq -.-> Write
+    Websites["Official notary websites"] -.-> Check
+    Websites -.-> Verify
+```
+
+Both paths prepare drafts for human review; neither sends emails. Agent nodes
+return incremental state updates, while persistence stores passing drafts with
+`pending` status. Evaluation passing is separate from human approval.
+
 ## Setup
 
 Requires Python 3.13+, uv, a Groq API key, and an existing Supabase project.
