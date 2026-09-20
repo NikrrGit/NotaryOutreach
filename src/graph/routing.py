@@ -111,3 +111,76 @@ def route_after_verification(
         stage="verification",
         max_retries=max_retries,
     )
+
+
+def route_after_evaluation(
+    state: Any,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+) -> Route:
+    """
+    Decide what happens after the evaluator.
+
+    The evaluator currently checks:
+
+        appointment_requested
+        correct_company_type
+        claims_supported
+        passed
+
+    A draft continues only when every required safety/quality
+    condition passed.
+
+    Failed drafts may be regenerated up to the retry limit.
+    """
+    evaluation = _get_value(state, "evaluation")
+
+    if evaluation is None:
+        return _retry_or_manual_review(
+            state,
+            stage="email",
+            max_retries=max_retries,
+        )
+
+    passed = bool(_get_value(evaluation, "passed", False))
+
+    appointment_requested = bool(
+        _get_value(
+            evaluation,
+            "appointment_requested",
+            False,
+        )
+    )
+
+    correct_company_type = bool(
+        _get_value(
+            evaluation,
+            "correct_company_type",
+            False,
+        )
+    )
+
+    claims_supported = bool(
+        _get_value(
+            evaluation,
+            "claims_supported",
+            False,
+        )
+    )
+
+    all_checks_passed = all(
+        [
+            passed,
+            appointment_requested,
+            correct_company_type,
+            claims_supported,
+        ]
+    )
+
+    if all_checks_passed:
+        return "continue"
+
+    return _retry_or_manual_review(
+        state,
+        stage="email",
+        max_retries=max_retries,
+    )
