@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import operator
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, Literal, NotRequired, TypedDict
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -133,3 +133,4 @@ class WorkflowState(TypedDict):
 
     # Retry Tracking
     retry_counts: RetryCounts
+    status: NotRequired[Literal["pending", "manual_review", "ready_for_review"]]
