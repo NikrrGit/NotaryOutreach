@@ -86,3 +86,121 @@ class WorkflowTests(unittest.TestCase):
                         {"target_results": 0}, {"target_results": True}, {"target_results": 101}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 create_initial_state(**{ "location": "Berlin", "company_type": "UG", **changes})
+
+    def test_wrong_draft_evaluation_is_rejected(self):
+        self.evaluator.side_effect = lambda *_: EvaluationResult(
+            draft_id="unrelated-draft", passed=True, reasoning="Wrong draft.",
+        )
+        state = self.run_graph()
+        self.assertEqual(state["status"], "manual_review")
+        self.assertEqual(state["evaluations"], [])
+        self.assertEqual(len(state["errors"]), 3)
+
+    def test_writer_failure_recovers_without_repeating_verification(self):
+        draft = self.writer.write_verified.return_value
+        self.writer.write_verified.side_effect = [TimeoutError(), draft]
+        state = self.run_graph()
+        self.assertEqual(state["status"], "ready_for_review")
+        self.assertEqual(state["retry_counts"]["email_generation"], 1)
+        self.assertEqual(len(state["errors"]), 1)
+        self.verifier.verify.assert_called_once()
+
+    def test_only_failed_candidates_get_new_drafts(self):
+        second = self.candidate.model_copy(update={"name": "Second", "source_url": "https://second.example"})
+        self.discovery.discover.return_value = [self.candidate, second]
+        self.verifier.verify.side_effect = [self.result, self.result.model_copy(update={"candidate": second})]
+        attempts = {}
+
+        def evaluate(draft, verification):
+            name = draft.candidate.name
+            attempts[name] = attempts.get(name, 0) + 1
+            return EvaluationResult(
+                draft_id=draft.draft_id,
+                passed=name == "Office" or attempts[name] > 1,
+                reasoning="Checked draft.",
+            )
+
+        self.evaluator.side_effect = evaluate
+        state = self.run_graph()
+        self.assertEqual(state["status"], "ready_for_review")
+        self.assertEqual(attempts, {"Office": 1, "Second": 2})
+        self.assertEqual(len(state["email_drafts"]), 3)
+
+    def test_resume_after_reopening_database_preserves_models_and_history(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from graph.checkpointing import checkpoint_config, open_checkpointer, resume_job, start_job
+        from graph.state import CandidateEmailDraft, SearchSettings
+
+        def build(saver):
+            return build_workflow(
+                discovery_agent=self.discovery, verification_agent=self.verifier,
+                email_writer=self.writer, evaluator=self.evaluator, checkpointer=saver,
+            )
+
+        config = checkpoint_config("interrupted-job")
+        with TemporaryDirectory() as directory:
+            database = Path(directory) / "checkpoints.sqlite3"
+            with open_checkpointer(database) as saver:
+                graph = build(saver)
+                graph.invoke(
+                    create_initial_state(location="Berlin", company_type="UG"),
+                    config, interrupt_before=["evaluate"], durability="sync",
+                )
+                self.assertEqual(graph.get_state(config).next, ("evaluate",))
+                self.evaluator.assert_not_called()
+
+            with open_checkpointer(database) as saver:
+                graph = build(saver)
+                result = resume_job(graph, thread_id="interrupted-job")
+                self.assertEqual(result["status"], "ready_for_review")
+                self.assertIsInstance(result["settings"], SearchSettings)
+                self.assertIsInstance(result["candidates"][0], Candidate)
+                self.assertIsInstance(result["verification_results"][0], VerificationResult)
+                self.assertIsInstance(result["email_drafts"][0], CandidateEmailDraft)
+                self.assertEqual(len(result["email_drafts"]), 1)
+                self.discovery.discover.assert_called_once()
+                self.verifier.verify.assert_called_once()
+                self.writer.write_verified.assert_called_once()
+                self.evaluator.assert_called_once()
+                self.assertEqual(resume_job(graph, thread_id="interrupted-job"), result)
+                self.evaluator.assert_called_once()
+                with self.assertRaises(ValueError):
+                    start_job(graph, thread_id="interrupted-job", initial_state={})
+                with self.assertRaises(ValueError):
+                    resume_job(graph, thread_id="missing-job")
+                self.assertIsNone(saver.get_tuple(checkpoint_config("other-job")))
+
+    def test_process_interruption_resumes_pending_node(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from graph.checkpointing import open_checkpointer, resume_job, start_job
+
+        # BaseException simulates process interruption, escaping node error handling.
+        class ProcessInterrupted(BaseException):
+            pass
+
+        self.writer.write_verified.side_effect = ProcessInterrupted()
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "checkpoints.sqlite3"
+            with open_checkpointer(path) as saver:
+                graph = build_workflow(
+                    discovery_agent=self.discovery, verification_agent=self.verifier,
+                    email_writer=self.writer, evaluator=self.evaluator, checkpointer=saver,
+                )
+                with self.assertRaises(ProcessInterrupted):
+                    start_job(graph, thread_id="crashed-job", initial_state=create_initial_state(
+                        location="Berlin", company_type="UG",
+                    ))
+            self.writer.write_verified.side_effect = None
+            with open_checkpointer(path) as saver:
+                graph = build_workflow(
+                    discovery_agent=self.discovery, verification_agent=self.verifier,
+                    email_writer=self.writer, evaluator=self.evaluator, checkpointer=saver,
+                )
+                result = resume_job(graph, thread_id="crashed-job")
+                self.assertEqual(result["status"], "ready_for_review")
+                self.assertEqual(len(result["email_drafts"]), 1)
+                self.discovery.discover.assert_called_once()
+                self.verifier.verify.assert_called_once()
+                self.assertEqual(self.writer.write_verified.call_count, 2)

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from agents.email_writer import EmailWriterInput
 
@@ -43,11 +44,14 @@ def build_workflow(
     verification_agent: Any,
     email_writer: Any,
     evaluator: EvaluateDraft,
+    checkpointer: BaseCheckpointSaver | None = None,
 ):
     """Build a graph that produces drafts for human review without sending them.
 
     The evaluator is a callable taking a CandidateEmailDraft and its
     VerificationResult and returning the state's EvaluationResult.
+    Pass an open durable checkpointer to enable restart/resume, and keep its
+    connection open for the lifetime of graph execution.
     """
     nodes = WorkflowNodes(
         discovery=discovery_agent,
@@ -152,4 +156,4 @@ def build_workflow(
     graph.add_edge("increment_email_retry", "write_emails")
     graph.add_edge("complete", END)
     graph.add_edge("manual_review", END)
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)

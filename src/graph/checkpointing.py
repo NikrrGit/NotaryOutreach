@@ -54,3 +54,34 @@ def checkpoint_config(thread_id: str) -> RunnableConfig:
     if not isinstance(thread_id, str) or not thread_id.strip():
         raise ValueError("thread_id must be a non-empty string.")
     return {"configurable": {"thread_id": thread_id}}
+
+
+def start_job(graph, *, thread_id: str, initial_state: dict) -> dict:
+    """Start a new job and flush each checkpoint before advancing.
+
+    Reject reused IDs: submitting initial state twice would append duplicate
+    records to the graph's history channels. The caller must serialize runs
+    for a given thread; this existence check is not a distributed lock.
+    """
+    config = checkpoint_config(thread_id)
+    snapshot = graph.get_state(config)
+    if snapshot.created_at is not None:
+        raise ValueError("This thread already exists; use resume_job instead.")
+    return graph.invoke(initial_state, config, durability="sync")
+
+
+def resume_job(graph, *, thread_id: str) -> dict:
+    """Resume the latest saved checkpoint without re-submitting initial state.
+
+    Rebuild the graph with the same agents and database after a restart. A
+    completed job returns its stored state without replaying any agent calls.
+    This helper handles failed/statically interrupted runs, not dynamic
+    human-input interrupts that require LangGraph's Command(resume=...).
+    """
+    config = checkpoint_config(thread_id)
+    snapshot = graph.get_state(config)
+    if snapshot.created_at is None:
+        raise ValueError("No checkpoint exists for this thread.")
+    if not snapshot.next:
+        return snapshot.values
+    return graph.invoke(None, config, durability="sync")

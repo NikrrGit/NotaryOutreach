@@ -154,3 +154,39 @@ uv run python -m unittest discover -s tests
 ## License
 
 [MIT](LICENSE)
+
+### Durable workflow checkpoints
+
+`graph.checkpointing.open_checkpointer()` stores local synchronous checkpoints in
+`runs/checkpoints.sqlite3` by default. Keep that directory on persistent storage.
+Compile the graph inside the context so the SQLite connection remains open:
+
+```python
+from graph.checkpointing import open_checkpointer, start_job, resume_job
+from graph.workflow import build_workflow, create_initial_state
+
+with open_checkpointer() as saver:
+    graph = build_workflow(
+        discovery_agent=discovery,
+        verification_agent=verifier,
+        email_writer=writer,
+        evaluator=evaluator,
+        checkpointer=saver,
+    )
+    result = start_job(
+        graph,
+        thread_id="stable-job-id",
+        initial_state=create_initial_state(location="Berlin", company_type="UG"),
+    )
+    # After interruption/restart, reopen the same database and rebuild the graph,
+    # then call this instead of start_job:
+    # result = resume_job(graph, thread_id="stable-job-id")
+```
+
+Supply the existing agent instances and a callable evaluator accepting a
+`CandidateEmailDraft` and its `VerificationResult`. The checkpoint helpers use
+synchronous durability and reject missing/reused job IDs. Run only one invocation
+per thread at a time. Resumption may repeat the interrupted node's external calls;
+completed checkpoints are retained, but external side effects are not exactly-once.
+This SQLite configuration is for local synchronous jobs, not a distributed service.
+See [LangGraph persistence](https://docs.langchain.com/oss/python/langgraph/persistence).
