@@ -204,3 +204,18 @@ class WorkflowTests(unittest.TestCase):
                 self.discovery.discover.assert_called_once()
                 self.verifier.verify.assert_called_once()
                 self.assertEqual(self.writer.write_verified.call_count, 2)
+
+    def test_real_evaluator_adapts_provider_assessment_to_workflow(self):
+        from agents.evaluator import EmailEvaluator
+
+        provider = Mock()
+        provider.generate_structured.return_value = {
+            "passed": True, "appointment_requested": True,
+            "correct_company_type": True, "claims_supported": True,
+            "score": 0.95, "reasoning": "All checks passed.", "issues": [],
+        }
+        self.evaluator = EmailEvaluator(provider)
+        state = self.run_graph()
+        self.assertEqual(state["status"], "ready_for_review")
+        self.assertEqual(state["evaluations"][0].draft_id, state["email_drafts"][0].draft_id)
+        provider.generate_structured.assert_called_once()

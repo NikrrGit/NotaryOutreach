@@ -4,7 +4,7 @@ Nodes return state updates without mutating the input. Append-reduced fields
 contain only new records. Routing and retry budgets belong to the graph caller.
 The current writer supports German only; discovery does not enforce radius_km.
 
-The evaluator module is unfinished. Supply an evaluation callable accepting a
+Supply an evaluation callable (such as EmailEvaluator) accepting a
 CandidateEmailDraft and its VerificationResult and returning EvaluationResult.
 No credentials are loaded or external clients created when this module imports.
 """
