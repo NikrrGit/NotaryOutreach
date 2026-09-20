@@ -184,3 +184,25 @@ def route_after_evaluation(
         stage="email",
         max_retries=max_retries,
     )
+
+def route_on_error(
+    state: Any,
+    stage: str,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+) -> Route:
+    """
+    Generic routing for recoverable workflow errors.
+
+    Examples:
+        Groq timeout
+        malformed structured output
+        temporary website failure
+
+    The node handling the retry is responsible for incrementing
+    retry_counts[stage].
+    """
+    return _retry_or_manual_review(
+        state,
+        stage=stage,
+        max_retries=max_retries,
+    )
