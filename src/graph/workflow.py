@@ -88,3 +88,65 @@ def build_workflow(
     """
 
     graph = StateGraph(WorkflowState)
+
+
+# ------------------------------------------------------------------
+    # Nodes
+    # ------------------------------------------------------------------
+
+    def discover_node(state: WorkflowState) -> dict:
+        """
+        Find candidate notaries.
+        """
+
+        candidates = discovery_agent.discover(
+            location=state["location"],
+            company_type=state["company_type"],
+            limit=state["target_results"],
+        )
+
+        return {
+            "candidates": candidates,
+            "status": "discovered",
+        }
+
+    def verify_node(state: WorkflowState) -> dict:
+        """
+        Verify discovered candidates.
+
+        Verification is intentionally separate from discovery.
+        """
+
+        verified = []
+
+        for candidate in state["candidates"]:
+            try:
+                result = verification_agent.verify(
+                    candidate=candidate,
+                    company_type=state["company_type"],
+                )
+
+                verified.append(result)
+
+            except Exception as exc:
+                errors = list(state.get("errors", []))
+
+                errors.append(
+                    {
+                        "stage": "verification",
+                        "candidate": getattr(
+                            candidate,
+                            "name",
+                            "unknown",
+                        ),
+                        "error": str(exc),
+                    }
+                )
+
+                # One bad candidate must not kill the whole job.
+                continue
+
+        return {
+            "verified_candidates": verified,
+            "status": "verified",
+        }
