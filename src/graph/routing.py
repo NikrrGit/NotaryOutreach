@@ -8,8 +8,7 @@ Route = Literal["continue", "retry", "manual_review"]
 DEFAULT_MAX_RETRIES = 2
 
 
-
-def _get_values(obj: Any, key: str, default: Any = None) -> Any: 
+def _get_values(obj: Any, key: str, default: Any = None) -> Any:
     """
     Read a value from either:
     - a dictionary / TypedDict
@@ -27,24 +26,24 @@ def _get_values(obj: Any, key: str, default: Any = None) -> Any:
 
     return getattr(obj, key, default)
 
+
 def _retry_count(state: Any, stage: str) -> int:
     """
-       Retry how many times a specific workflow stage has already retried
-       
-       Expected state shape:
+    Read how many times a specific workflow stage has already retried.
 
-            retry_counts = {
+    Expected state shape:
+
+        retry_counts = {
             "verification": 1,
-            "email": 0,
+            "email_generation": 0,
             "evaluation": 0,
         }
-        """
+    """
     retry_counts = _get_values(state, "retry_counts", {})
 
     if not isinstance(retry_counts, Mapping):
         return 0
     return int(retry_counts.get(stage, 0))
-
 
 
 def _retry_or_manual_review(
@@ -63,6 +62,7 @@ def _retry_or_manual_review(
 
     return "manual_review"
 
+
 def route_after_verification(
     state: Any,
     max_retries: int = DEFAULT_MAX_RETRIES,
@@ -79,7 +79,7 @@ def route_after_verification(
 
     After the retry budget is exhausted, request manual review.
     """
-    verification = _get_value(state, "verification")
+    verification = _get_values(state, "verification")
 
     if verification is None:
         return _retry_or_manual_review(
@@ -88,14 +88,14 @@ def route_after_verification(
             max_retries=max_retries,
         )
 
-    supported = _get_value(
+    supported = _get_values(
         verification,
         "supported",
-        _get_value(verification, "eligible", False),
+        _get_values(verification, "eligible", False),
     )
 
-    evidence = _get_value(verification, "evidence")
-    source_url = _get_value(verification, "source_url")
+    evidence = _get_values(verification, "evidence")
+    source_url = _get_values(verification, "source_url")
 
     verification_complete = bool(
         supported
@@ -111,7 +111,6 @@ def route_after_verification(
         stage="verification",
         max_retries=max_retries,
     )
-
 
 def route_after_evaluation(
     state: Any,
@@ -132,19 +131,19 @@ def route_after_evaluation(
 
     Failed drafts may be regenerated up to the retry limit.
     """
-    evaluation = _get_value(state, "evaluation")
+    evaluation = _get_values(state, "evaluation")
 
     if evaluation is None:
         return _retry_or_manual_review(
             state,
-            stage="email",
+            stage="email_generation",
             max_retries=max_retries,
         )
 
-    passed = bool(_get_value(evaluation, "passed", False))
+    passed = bool(_get_values(evaluation, "passed", False))
 
     appointment_requested = bool(
-        _get_value(
+        _get_values(
             evaluation,
             "appointment_requested",
             False,
@@ -152,7 +151,7 @@ def route_after_evaluation(
     )
 
     correct_company_type = bool(
-        _get_value(
+        _get_values(
             evaluation,
             "correct_company_type",
             False,
@@ -160,7 +159,7 @@ def route_after_evaluation(
     )
 
     claims_supported = bool(
-        _get_value(
+        _get_values(
             evaluation,
             "claims_supported",
             False,
@@ -181,9 +180,10 @@ def route_after_evaluation(
 
     return _retry_or_manual_review(
         state,
-        stage="email",
+        stage="email_generation",
         max_retries=max_retries,
     )
+
 
 def route_on_error(
     state: Any,
