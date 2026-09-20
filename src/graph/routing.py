@@ -45,4 +45,69 @@ def _retry_count(state: Any, stage: str) -> int:
         return 0
     return int(retry_counts.get(stage, 0))
 
- 
+
+
+def _retry_or_manual_review(
+    state: Any,
+    stage: str,
+    max_retries: int,
+) -> Route:
+    """
+    Retry while budget remains.
+
+    Once the retry limit is reached, stop autonomous execution and
+    send the item to manual review.
+    """
+    if _retry_count(state, stage) < max_retries:
+        return "retry"
+
+    return "manual_review"
+
+def route_after_verification(
+    state: Any,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+) -> Route:
+    """
+    Decide what happens after the verification agent.
+
+    Continue only when:
+        - verification says the candidate is supported/relevant
+        - evidence exists
+        - a source URL exists
+
+    Retry incomplete verification.
+
+    After the retry budget is exhausted, request manual review.
+    """
+    verification = _get_value(state, "verification")
+
+    if verification is None:
+        return _retry_or_manual_review(
+            state,
+            stage="verification",
+            max_retries=max_retries,
+        )
+
+    supported = _get_value(
+        verification,
+        "supported",
+        _get_value(verification, "eligible", False),
+    )
+
+    evidence = _get_value(verification, "evidence")
+    source_url = _get_value(verification, "source_url")
+
+    verification_complete = bool(
+        supported
+        and evidence
+        and source_url
+    )
+
+    if verification_complete:
+        return "continue"
+
+    return _retry_or_manual_review(
+        state,
+        stage="verification",
+        max_retries=max_retries,
+    )
