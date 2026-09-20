@@ -16,7 +16,7 @@ from notaryoutreach.verification import fetch_page_text
 from .discovery import Candidate
 
 CompanyType = Literal["UG", "GmbH"]
-AssessmentProvider = Callable[[str, str, dict], str]
+AssessmentProvider = Callable[[str, str, dict], str]   
 PageReader = Callable[[str, list[str]], str]
 
 
