@@ -151,3 +151,35 @@ class SQLiteStorage:
                 f"SELECT * FROM {table} WHERE id = ?", (record_id,),
             ).fetchone()
             return None if row is None else self._decode(row)
+
+    def list_records(self, table: str, *, job_id: str | None = None) -> list[dict[str, Any]]:
+        """Load records in insertion order, optionally scoped to one search job.
+
+        A missing job yields an empty list. Use get_record('jobs', job_id) to
+        check existence. Loading stored data supports service-level recovery;
+        resuming LangGraph execution still requires its graph checkpoint.
+        """
+        if table not in _FIELDS:
+            raise ValueError(f"Unknown table: {table}")
+        query = f"SELECT record.* FROM {table} AS record"
+        parameters: tuple[str, ...] = ()
+        if job_id is not None:
+            if table == "jobs":
+                query += " WHERE record.id = ?"
+            elif table == "candidates":
+                query += " WHERE record.job_id = ?"
+            elif table in ("verifications", "drafts"):
+                query += (
+                    " JOIN candidates AS candidate ON candidate.id = record.candidate_id"
+                    " WHERE candidate.job_id = ?"
+                )
+            else:
+                query += (
+                    " JOIN drafts AS draft ON draft.id = record.draft_id"
+                    " JOIN candidates AS candidate ON candidate.id = draft.candidate_id"
+                    " WHERE candidate.job_id = ?"
+                )
+            parameters = (job_id,)
+        query += " ORDER BY record.rowid"
+        with closing(self._connect()) as connection:
+            return [self._decode(row) for row in connection.execute(query, parameters)]
