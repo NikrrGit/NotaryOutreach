@@ -74,3 +74,14 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(reopened.get_record("jobs", "notary")["status"], "ready_for_review")
         self.assertIs(reopened.get_record("verifications", "verification-vc")["eligible"], True)
         self.assertIs(reopened.get_record("evaluations", "evaluation-vc")["passed"], True)
+
+    def test_replaying_stable_ids_does_not_duplicate_records(self):
+        before = {table: self.storage.list_records(table) for table, _ in self.records}
+        reopened = SQLiteStorage(self.path)
+        for _ in range(2):
+            for table, record in self.records:
+                with self.subTest(table=table, record_id=record["id"]):
+                    self.assertEqual(reopened.save_record(table, record), record["id"])
+        for table, expected in before.items():
+            with self.subTest(table=table):
+                self.assertEqual(reopened.list_records(table), expected)
