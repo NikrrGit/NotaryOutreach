@@ -126,3 +126,18 @@ class SQLiteStorage:
                     tuple(values.values()),
                 )
         return values["id"]
+
+    def update_job(self, job_id: str, *, status: str) -> None:
+        """Update job status and timestamp; missing jobs raise KeyError.
+
+        Search settings are immutable: use a new job for a different search.
+        This records lifecycle state, not a lock or a workflow resume operation.
+        """
+        with closing(self._connect()) as connection, connection:
+            cursor = connection.execute(
+                "UPDATE jobs SET status = ?, "
+                "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+                (status, job_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(job_id)
