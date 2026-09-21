@@ -61,3 +61,15 @@ class SQLiteStorage:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
+
+    @staticmethod
+    def _decode(row: sqlite3.Row) -> dict[str, Any]:
+        """Return a detached record with JSON and tri-state booleans decoded."""
+        record = dict(row)
+        for field in _JSON_FIELDS:
+            if field in record:
+                record[field] = json.loads(record[field])
+        for field in ("eligible", "passed"):
+            if field in record and record[field] is not None:
+                record[field] = bool(record[field])
+        return record
