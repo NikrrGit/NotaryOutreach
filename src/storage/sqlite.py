@@ -54,3 +54,10 @@ class SQLiteStorage:
                 connection.executescript(migration.read_text(encoding="utf-8"))
             elif version != 1:
                 raise ValueError(f"Unsupported database schema version: {version}")
+
+    def _connect(self) -> sqlite3.Connection:
+        """Open a connection with foreign keys enforced and named columns."""
+        connection = sqlite3.connect(self.path, timeout=30)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        return connection
