@@ -73,3 +73,56 @@ class SQLiteStorage:
             if field in record and record[field] is not None:
                 record[field] = bool(record[field])
         return record
+
+    def save_record(self, table: str, record: dict[str, Any]) -> str:
+        """Insert a job, candidate, verification, draft, evaluation or review.
+
+        Returns the supplied ID, or a generated UUID for a new record. Reuse
+        that ID for retries. Conflicting replays raise ValueError without
+        changing existing data. Required fields and relationships are enforced
+        by SQLite. Each write is atomic; related parent records must exist.
+        """
+        if table not in _FIELDS:
+            raise ValueError(f"Unknown table: {table}")
+        values = dict(record)
+        if values.keys() - _FIELDS[table]:
+            raise ValueError("Unknown or read-only record fields.")
+        values.setdefault("id", str(uuid4()))
+        if not isinstance(values["id"], str) or not values["id"].strip():
+            raise ValueError("Record ID must be a nonempty string.")
+        for field, expected in _JSON_FIELDS.items():
+            if field in values:
+                value = values[field]
+                if isinstance(value, str):
+                    value = json.loads(value)
+                if not isinstance(value, expected):
+                    raise ValueError(f"{field} must contain a JSON {expected.__name__}.")
+                values[field] = json.dumps(value, sort_keys=True, allow_nan=False)
+        for field in ("eligible", "passed"):
+            if field in values and values[field] is not None:
+                if type(values[field]) not in (bool, int) or values[field] not in (0, 1):
+                    raise ValueError(f"{field} must be a boolean.")
+        if "target_count" in values and type(values["target_count"]) is not int:
+            raise ValueError("target_count must be an integer.")
+        columns = ", ".join(values)
+        placeholders = ", ".join("?" for _ in values)
+        # Identifiers above come exclusively from the allowlist; all caller
+        # values are bound parameters. BEGIN IMMEDIATE serializes replay checks.
+        with closing(self._connect()) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                f"SELECT * FROM {table} WHERE id = ?", (values["id"],),
+            ).fetchone()
+            if existing is not None:
+                for field, value in values.items():
+                    stored = existing[field]
+                    if field in _JSON_FIELDS:
+                        stored, value = json.loads(stored), json.loads(value)
+                    if stored != value:
+                        raise ValueError(f"Conflicting replay for {table} record {values['id']}.")
+            else:
+                connection.execute(
+                    f"INSERT INTO {table} ({columns}) VALUES ({placeholders})",
+                    tuple(values.values()),
+                )
+        return values["id"]
