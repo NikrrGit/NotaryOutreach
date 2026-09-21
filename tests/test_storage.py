@@ -103,3 +103,31 @@ class StorageTests(unittest.TestCase):
                         self.storage.save_record(table, {**record, **change})
                     reopened = SQLiteStorage(self.path)
                     self.assertEqual(reopened.list_records(table, job_id=target), before)
+
+    def test_new_draft_versions_preserve_review_history(self):
+        for target in ("notary", "vc"):
+            with self.subTest(target=target):
+                original_draft = self.storage.get_record("drafts", f"draft-{target}")
+                original_review = self.storage.get_record("reviews", f"review-{target}")
+                draft_id = self.storage.save_record("drafts", {
+                    "candidate_id": f"candidate-{target}",
+                    "subject": "Updated enquiry", "body": "Could we meet next week?",
+                })
+                self.assertNotEqual(draft_id, original_draft["id"])
+                self.assertFalse(any(
+                    review["draft_id"] == draft_id
+                    for review in self.storage.list_records("reviews", job_id=target)
+                ))
+                review_id = self.storage.save_record("reviews", {
+                    "draft_id": draft_id, "decision": "edited",
+                    "final_subject": "Updated enquiry",
+                    "final_body": "Could we meet next week?",
+                })
+                reopened = SQLiteStorage(self.path)
+                self.assertEqual(reopened.get_record("drafts", original_draft["id"]), original_draft)
+                reviews = reopened.list_records("reviews", job_id=target)
+                self.assertEqual(len(reviews), 2)
+                self.assertEqual(reviews[0], original_review)
+                self.assertEqual(reviews[1]["id"], review_id)
+                self.assertEqual(reviews[1]["draft_id"], draft_id)
+                self.assertEqual(reviews[1]["decision"], "edited")
