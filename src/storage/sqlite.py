@@ -141,3 +141,13 @@ class SQLiteStorage:
             )
             if cursor.rowcount != 1:
                 raise KeyError(job_id)
+
+    def get_record(self, table: str, record_id: str) -> dict[str, Any] | None:
+        """Load a single record, returning None when the ID does not exist."""
+        if table not in _FIELDS:
+            raise ValueError(f"Unknown table: {table}")
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                f"SELECT * FROM {table} WHERE id = ?", (record_id,),
+            ).fetchone()
+            return None if row is None else self._decode(row)
