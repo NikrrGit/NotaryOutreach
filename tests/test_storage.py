@@ -85,3 +85,21 @@ class StorageTests(unittest.TestCase):
         for table, expected in before.items():
             with self.subTest(table=table):
                 self.assertEqual(reopened.list_records(table), expected)
+
+    def test_conflicting_replays_preserve_drafts_and_reviews(self):
+        for target in ("notary", "vc"):
+            for table, change in (
+                ("drafts", {"body": "Replacement body"}),
+                ("reviews", {"decision": "rejected"}),
+                ("reviews", {"final_body": "Replacement body"}),
+            ):
+                with self.subTest(target=target, table=table, change=change):
+                    record = next(
+                        record for name, record in self.records
+                        if name == table and record["id"].endswith(target)
+                    )
+                    before = self.storage.list_records(table, job_id=target)
+                    with self.assertRaisesRegex(ValueError, "Conflicting replay"):
+                        self.storage.save_record(table, {**record, **change})
+                    reopened = SQLiteStorage(self.path)
+                    self.assertEqual(reopened.list_records(table, job_id=target), before)
