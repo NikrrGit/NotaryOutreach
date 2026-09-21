@@ -54,3 +54,23 @@ class StorageTests(unittest.TestCase):
             ])
         for table, record in self.records:
             self.storage.save_record(table, record)
+
+    def test_records_and_job_progress_survive_reopening(self):
+        self.storage.update_job("notary", status="ready_for_review")
+        before = {
+            (table, record["id"]): self.storage.get_record(table, record["id"])
+            for table, record in self.records
+        }
+        reopened = SQLiteStorage(self.path)
+        self.assertTrue(self.path.is_file())
+        for table, record in self.records:
+            with self.subTest(table=table, record_id=record["id"]):
+                stored = reopened.get_record(table, record["id"])
+                self.assertEqual(stored, before[table, record["id"]])
+                for field, expected in record.items():
+                    self.assertEqual(stored[field], expected)
+                target = record["id"].split("-")[-1]
+                self.assertEqual(reopened.list_records(table, job_id=target), [stored])
+        self.assertEqual(reopened.get_record("jobs", "notary")["status"], "ready_for_review")
+        self.assertIs(reopened.get_record("verifications", "verification-vc")["eligible"], True)
+        self.assertIs(reopened.get_record("evaluations", "evaluation-vc")["passed"], True)
