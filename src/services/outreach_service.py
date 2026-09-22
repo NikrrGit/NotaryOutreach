@@ -58,3 +58,10 @@ class OutreachService:
     def list_jobs(self) -> list[dict[str, Any]]:
         """List saved jobs, newest first."""
         return list(reversed(self.storage.list_records("jobs")))
+
+    def load_results(self, job_id: str) -> dict[str, Any]:
+        """Load a job and its evidence, draft, evaluation and review history."""
+        results = {"job": self.load_job(job_id)}
+        for table in ("candidates", "verifications", "drafts", "evaluations", "reviews"):
+            results[table] = self.storage.list_records(table, job_id=job_id)
+        return results
