@@ -115,3 +115,7 @@ class OutreachService:
     def approve_draft(self, job_id: str, draft_id: str, *, review_id: str | None = None) -> str:
         """Record human approval; no email is sent."""
         return self._review_draft(job_id, draft_id, decision="approved", review_id=review_id)
+
+    def reject_draft(self, job_id: str, draft_id: str, *, review_id: str | None = None) -> str:
+        """Record rejection while preserving earlier reviews."""
+        return self._review_draft(job_id, draft_id, decision="rejected", review_id=review_id)
