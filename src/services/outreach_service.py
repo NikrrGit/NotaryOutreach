@@ -47,3 +47,10 @@ class OutreachService:
         if job_id is not None:
             record["id"] = job_id
         return self.storage.save_record("jobs", record)
+
+    def load_job(self, job_id: str) -> dict[str, Any]:
+        """Load a saved job or raise KeyError."""
+        job = self.storage.get_record("jobs", job_id)
+        if job is None:
+            raise KeyError(job_id)
+        return job
