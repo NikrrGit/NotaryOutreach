@@ -65,3 +65,26 @@ class OutreachService:
         for table in ("candidates", "verifications", "drafts", "evaluations", "reviews"):
             results[table] = self.storage.list_records(table, job_id=job_id)
         return results
+
+    def edit_email(
+        self, job_id: str, draft_id: str, *, subject: str, body: str,
+        new_draft_id: str | None = None,
+    ) -> str:
+        """Save a new draft version requiring fresh evaluation and approval."""
+        if not isinstance(subject, str) or not subject.strip():
+            raise ValueError("subject must be nonempty text.")
+        if not isinstance(body, str) or not body.strip():
+            raise ValueError("body must be nonempty text.")
+        results = self.load_results(job_id)
+        original = next((draft for draft in results["drafts"] if draft["id"] == draft_id), None)
+        if original is None:
+            raise KeyError(draft_id)
+        if new_draft_id == draft_id:
+            raise ValueError("An edit requires a new draft ID.")
+        record = {
+            "candidate_id": original["candidate_id"],
+            "subject": subject.strip(), "body": body.strip(),
+        }
+        if new_draft_id is not None:
+            record["id"] = new_draft_id
+        return self.storage.save_record("drafts", record)
