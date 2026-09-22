@@ -41,3 +41,59 @@ def render_search(service: OutreachService) -> None:
             st.session_state["selected_job"] = job_id
             st.session_state["notice"] = "Search saved. Execution is not available yet."
             st.rerun()
+
+
+def render_draft(service: OutreachService, job_id: str, draft: dict, results: dict) -> None:
+    """Show an exact draft version and its review controls."""
+    draft_id = draft["id"]
+    evaluations = [item for item in results["evaluations"] if item["draft_id"] == draft_id]
+    reviews = [item for item in results["reviews"] if item["draft_id"] == draft_id]
+    evaluation = evaluations[-1] if evaluations else None
+    decision = reviews[-1]["decision"] if reviews else "pending"
+    st.caption(f"Human review: {decision}")
+    if evaluation:
+        st.write("Evaluation:", "Passed" if evaluation["passed"] else "Failed")
+        if evaluation.get("score") is not None:
+            st.write("Score:", evaluation["score"])
+        st.text(evaluation.get("reasoning") or "No evaluation explanation recorded.")
+        for issue in evaluation["issues_json"]:
+            st.text(str(issue))
+    else:
+        st.info("This version needs evaluation before approval.")
+    subject = st.text_input("Subject", value=draft["subject"], key=f"subject-{draft_id}")
+    body = st.text_area("Email", value=draft["body"], height=220, key=f"body-{draft_id}")
+    changed = subject != draft["subject"] or body != draft["body"]
+    if changed:
+        st.caption("Save changes as a new version before reviewing it.")
+    save, approve, reject = st.columns(3)
+    edited = save.button("Save new version", key=f"edit-{draft_id}", disabled=not changed)
+    approved = approve.button(
+        "Approve", key=f"approve-{draft_id}",
+        disabled=changed or not evaluation or not evaluation["passed"] or decision == "approved",
+    )
+    rejected = reject.button("Reject", key=f"reject-{draft_id}", disabled=changed or decision == "rejected")
+    if edited or approved or rejected:
+        try:
+            if edited:
+                service.edit_email(job_id, draft_id, subject=subject, body=body)
+                st.session_state.pop(f"version-{draft['candidate_id']}", None)
+                notice = "New version saved. It needs a fresh evaluation and review."
+            elif approved:
+                service.approve_draft(job_id, draft_id)
+                notice = "Draft approved. No email was sent."
+            else:
+                service.reject_draft(job_id, draft_id)
+                notice = "Draft rejected."
+        except ValueError as exc:
+            st.error(str(exc))
+        except KeyError:
+            st.error("This draft is no longer available. Reload the search.")
+        else:
+            st.session_state["notice"] = notice
+            st.rerun()
+    if reviews:
+        with st.expander("Review history"):
+            for review in reviews:
+                st.caption(f"{review['created_at']} · {review['decision']}")
+                st.text(review["final_subject"])
+                st.text(review["final_body"])
