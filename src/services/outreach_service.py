@@ -54,3 +54,7 @@ class OutreachService:
         if job is None:
             raise KeyError(job_id)
         return job
+
+    def list_jobs(self) -> list[dict[str, Any]]:
+        """List saved jobs, newest first."""
+        return list(reversed(self.storage.list_records("jobs")))
