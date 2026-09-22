@@ -97,3 +97,51 @@ def render_draft(service: OutreachService, job_id: str, draft: dict, results: di
                 st.caption(f"{review['created_at']} · {review['decision']}")
                 st.text(review["final_subject"])
                 st.text(review["final_body"])
+
+
+def render_results(service: OutreachService) -> None:
+    """Browse saved searches using shared candidate and evidence views."""
+    jobs = service.list_jobs()
+    st.subheader("Saved searches")
+    if not jobs:
+        st.info("Save a search to get started.")
+        return
+    labels = {
+        job["id"]: f"{job['location']} · {'Notary' if job['target_type'] == 'notary' else 'VC'} · {job['created_at']} · {job['id'][:8]}"
+        for job in jobs
+    }
+    if st.session_state.get("selected_job") not in labels:
+        st.session_state["selected_job"] = jobs[0]["id"]
+    job_id = st.selectbox("Search", list(labels), format_func=labels.get, key="selected_job")
+    results = service.load_results(job_id)
+    job = results["job"]
+    st.caption(f"Status: {job['status']} · Requested results: {job['target_count']}")
+    with st.expander("Search settings"):
+        for field in ("location", "company_type", "startup_description", "industry", "funding_stage"):
+            if job.get(field):
+                st.text(f"{field.replace('_', ' ').capitalize()}: {job[field]}")
+    if not results["candidates"]:
+        st.info("No candidates saved for this search yet.")
+    for candidate in results["candidates"]:
+        candidate_id = candidate["id"]
+        with st.expander(candidate["name"], expanded=True):
+            for field in ("organization", "city", "website", "email", "phone", "source_url"):
+                st.text(f"{field.replace('_', ' ').capitalize()}: {candidate.get(field) or 'Not available'}")
+            verifications = [item for item in results["verifications"] if item["candidate_id"] == candidate_id]
+            if not verifications:
+                st.info("Verification pending.")
+            for verification in verifications:
+                eligible = verification["eligible"]
+                status = "Unknown" if eligible is None else "Eligible" if eligible else "Ineligible"
+                st.write("Verification:", status, "· Confidence:", verification["confidence"])
+                st.text(verification["reason"])
+                st.text(verification.get("evidence") or "No evidence recorded.")
+                st.text(f"Source: {verification.get('source_url') or 'Not available'}")
+            drafts = [item for item in reversed(results["drafts"]) if item["candidate_id"] == candidate_id]
+            if not drafts:
+                st.info("No email draft available.")
+                continue
+            versions = {draft["id"]: f"Version {len(drafts) - index} · {draft['created_at']}" for index, draft in enumerate(drafts)}
+            selected = st.selectbox("Draft version", list(versions), format_func=versions.get, key=f"version-{candidate_id}")
+            draft = next(item for item in drafts if item["id"] == selected)
+            render_draft(service, job_id, draft, results)
