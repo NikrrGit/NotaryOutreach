@@ -88,3 +88,26 @@ class OutreachService:
         if new_draft_id is not None:
             record["id"] = new_draft_id
         return self.storage.save_record("drafts", record)
+
+    def _review_draft(
+        self, job_id: str, draft_id: str, *, decision: Literal["approved", "rejected"],
+        review_id: str | None = None,
+    ) -> str:
+        """Append a review of the exact saved draft text."""
+        if decision not in ("approved", "rejected"):
+            raise ValueError("Review decision must be approved or rejected.")
+        results = self.load_results(job_id)
+        draft = next((item for item in results["drafts"] if item["id"] == draft_id), None)
+        if draft is None:
+            raise KeyError(draft_id)
+        if decision == "approved":
+            evaluations = [item for item in results["evaluations"] if item["draft_id"] == draft_id]
+            if not evaluations or not evaluations[-1]["passed"]:
+                raise ValueError("Approval requires a passing evaluation for this draft version.")
+        record = {
+            "draft_id": draft_id, "decision": decision,
+            "final_subject": draft["subject"], "final_body": draft["body"],
+        }
+        if review_id is not None:
+            record["id"] = review_id
+        return self.storage.save_record("reviews", record)
