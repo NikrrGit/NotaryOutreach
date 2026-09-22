@@ -145,3 +145,31 @@ def render_results(service: OutreachService) -> None:
             selected = st.selectbox("Draft version", list(versions), format_func=versions.get, key=f"version-{candidate_id}")
             draft = next(item for item in drafts if item["id"] == selected)
             render_draft(service, job_id, draft, results)
+
+
+def main() -> None:
+    """Run the local review page."""
+    st.set_page_config(page_title="Outreach", page_icon="✉", layout="wide")
+    st.title("Outreach")
+    st.caption("Find relevant contacts. Prepare emails. Review every draft.")
+    st.info("Search execution is not connected yet. You can save search settings and review existing results. No emails are sent.")
+    notice = st.session_state.pop("notice", None)
+    if notice:
+        st.success(notice)
+    try:
+        settings = {**dotenv_values(".env"), **os.environ}
+        storage = SQLiteStorage(settings.get("DATABASE_PATH") or "data/outreach.db")
+        service = OutreachService(storage)
+        render_search(service)
+        st.divider()
+        render_results(service)
+    except (sqlite3.Error, OSError):
+        st.error("Could not access the local database. Check its location and write permissions, then retry.")
+    except ValueError as exc:
+        st.error(str(exc))
+    except KeyError:
+        st.error("This search is no longer available. Reload the page.")
+
+
+if __name__ == "__main__":
+    main()
