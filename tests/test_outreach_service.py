@@ -59,3 +59,27 @@ class OutreachServiceTests(unittest.TestCase):
         generated_id = self.service.create_job(**self.settings["notary"])
         self.assertNotIn(generated_id, self.settings)
         self.assertEqual(self.service.load_job(generated_id)["status"], "pending")
+
+    def test_invalid_search_settings_leave_jobs_unchanged(self):
+        before = self.service.list_jobs()
+        cases = [
+            ("notary", {"target_type": "other"}),
+            ("notary", {"location": " "}),
+            ("notary", {"location": None}),
+            ("notary", {"target_count": True}),
+            ("notary", {"target_count": 0}),
+            ("notary", {"target_count": 101}),
+            ("notary", {"company_type": "LLC"}),
+            ("notary", {"company_type": None}),
+            ("notary", {"industry": "Security"}),
+            ("vc", {"company_type": "UG"}),
+            ("vc", {"startup_description": " "}),
+            ("vc", {"industry": None}),
+            ("vc", {"funding_stage": None}),
+        ]
+        for target, changes in cases:
+            with self.subTest(target=target, changes=changes), self.assertRaises(ValueError):
+                self.service.create_job(**{**self.settings[target], **changes})
+        with self.assertRaises(ValueError):
+            self.service.create_job(**{**self.settings["notary"], "location": "Munich"}, job_id="notary")
+        self.assertEqual(self.service.list_jobs(), before)
