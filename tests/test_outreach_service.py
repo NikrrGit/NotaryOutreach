@@ -115,3 +115,35 @@ class OutreachServiceTests(unittest.TestCase):
                     self.service.reject_draft(target, draft_id, review_id=f"approved-{target}")
                 reopened = OutreachService(SQLiteStorage(self.path))
                 self.assertEqual(reopened.load_results(target)["reviews"], before)
+
+    def test_edits_create_unapproved_versions_without_changing_originals(self):
+        for target in self.settings:
+            with self.subTest(target=target):
+                draft_id = f"draft-{target}"
+                self.storage.save_record("evaluations", {
+                    "draft_id": draft_id, "passed": True,
+                })
+                self.service.approve_draft(target, draft_id)
+                before = self.service.load_results(target)
+                for _ in range(2):
+                    edited_id = self.service.edit_email(
+                        target, draft_id, subject=" Updated enquiry ", body=" Updated body ",
+                        new_draft_id=f"edited-{target}",
+                    )
+                    self.assertEqual(edited_id, f"edited-{target}")
+                after = self.service.load_results(target)
+                self.assertEqual(len(after["drafts"]), 2)
+                self.assertEqual(after["drafts"][0], before["drafts"][0])
+                self.assertEqual(after["drafts"][1]["subject"], "Updated enquiry")
+                self.assertEqual(after["drafts"][1]["body"], "Updated body")
+                self.assertEqual(after["evaluations"], before["evaluations"])
+                self.assertEqual(after["reviews"], before["reviews"])
+                with self.assertRaises(ValueError):
+                    self.service.approve_draft(target, edited_id)
+                for changes in ({"subject": " "}, {"body": " "}, {"new_draft_id": draft_id}):
+                    with self.subTest(changes=changes), self.assertRaises(ValueError):
+                        self.service.edit_email(target, draft_id, **{
+                            **dict(subject="Updated enquiry", body="Updated body"), **changes,
+                        })
+                reopened = OutreachService(SQLiteStorage(self.path))
+                self.assertEqual(reopened.load_results(target), after)
