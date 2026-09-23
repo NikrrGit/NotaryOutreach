@@ -147,3 +147,22 @@ class OutreachServiceTests(unittest.TestCase):
                         })
                 reopened = OutreachService(SQLiteStorage(self.path))
                 self.assertEqual(reopened.load_results(target), after)
+
+    def test_missing_jobs_and_cross_job_drafts_cannot_be_reviewed_or_edited(self):
+        before = {target: self.service.load_results(target) for target in self.settings}
+        for load in (self.service.load_job, self.service.load_results):
+            with self.subTest(operation=load.__name__), self.assertRaises(KeyError):
+                load("missing")
+        for job_id, draft_id in (
+            ("notary", "draft-vc"), ("vc", "draft-notary"),
+            ("notary", "missing"), ("missing", "draft-notary"),
+        ):
+            for review in (self.service.approve_draft, self.service.reject_draft):
+                with self.subTest(job=job_id, draft=draft_id, operation=review.__name__):
+                    with self.assertRaises(KeyError):
+                        review(job_id, draft_id)
+            with self.subTest(job=job_id, draft=draft_id, operation="edit"):
+                with self.assertRaises(KeyError):
+                    self.service.edit_email(job_id, draft_id, subject="Changed", body="Changed")
+        for target, expected in before.items():
+            self.assertEqual(self.service.load_results(target), expected)
