@@ -83,3 +83,35 @@ class OutreachServiceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.service.create_job(**{**self.settings["notary"], "location": "Munich"}, job_id="notary")
         self.assertEqual(self.service.list_jobs(), before)
+
+    def test_reviews_require_latest_passing_evaluation_and_preserve_history(self):
+        for target in self.settings:
+            with self.subTest(target=target):
+                draft_id = f"draft-{target}"
+                with self.assertRaises(ValueError):
+                    self.service.approve_draft(target, draft_id)
+                self.assertEqual(self.service.load_results(target)["reviews"], [])
+                self.service.reject_draft(target, draft_id, review_id=f"rejected-{target}")
+                self.storage.save_record("evaluations", {
+                    "id": f"pass-{target}", "draft_id": draft_id, "passed": True,
+                })
+                for _ in range(2):
+                    self.assertEqual(
+                        self.service.approve_draft(target, draft_id, review_id=f"approved-{target}"),
+                        f"approved-{target}",
+                    )
+                before = self.service.load_results(target)["reviews"]
+                self.assertEqual([review["decision"] for review in before], ["rejected", "approved"])
+                for review in before:
+                    self.assertEqual(review["draft_id"], draft_id)
+                    self.assertEqual(review["final_subject"], "Enquiry")
+                    self.assertEqual(review["final_body"], "Could we arrange a meeting?")
+                self.storage.save_record("evaluations", {
+                    "id": f"fail-{target}", "draft_id": draft_id, "passed": False,
+                })
+                with self.assertRaises(ValueError):
+                    self.service.approve_draft(target, draft_id)
+                with self.assertRaises(ValueError):
+                    self.service.reject_draft(target, draft_id, review_id=f"approved-{target}")
+                reopened = OutreachService(SQLiteStorage(self.path))
+                self.assertEqual(reopened.load_results(target)["reviews"], before)
