@@ -36,3 +36,26 @@ class OutreachServiceTests(unittest.TestCase):
                 "id": f"draft-{target}", "candidate_id": f"candidate-{target}",
                 "subject": "Enquiry", "body": "Could we arrange a meeting?",
             })
+
+    def test_jobs_and_results_survive_reopening_without_duplicates(self):
+        for target, settings in self.settings.items():
+            with self.subTest(target=target):
+                self.storage.update_job(target, status="running")
+                self.assertEqual(self.service.create_job(**settings, job_id=target), target)
+                job = self.service.load_job(target)
+                self.assertEqual(job["status"], "running")
+                self.assertEqual(job["location"], settings["location"].strip())
+                for field, value in settings.items():
+                    self.assertEqual(job[field], value.strip())
+                results = self.service.load_results(target)
+                for table, prefix in (("candidates", "candidate"), ("verifications", "verification"), ("drafts", "draft")):
+                    self.assertEqual([row["id"] for row in results[table]], [f"{prefix}-{target}"])
+                self.assertEqual(results["verifications"][0]["evidence"], "Relevant services")
+                self.assertEqual(results["evaluations"], [])
+                self.assertEqual(results["reviews"], [])
+                reopened = OutreachService(SQLiteStorage(self.path))
+                self.assertEqual(reopened.load_results(target), results)
+        self.assertEqual([job["id"] for job in self.service.list_jobs()], ["vc", "notary"])
+        generated_id = self.service.create_job(**self.settings["notary"])
+        self.assertNotIn(generated_id, self.settings)
+        self.assertEqual(self.service.load_job(generated_id)["status"], "pending")
