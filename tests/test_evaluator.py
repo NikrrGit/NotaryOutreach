@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from agents.discovery import Candidate
 from agents.email_writer import EmailDraft
 from agents.evaluator import EmailEvaluator, EvaluationAssessment, EvaluatorInput
-from agents.verifier import VerificationResult
+from agents.verification import VerificationResult
 from graph.state import CandidateEmailDraft, EvaluationResult
 
 

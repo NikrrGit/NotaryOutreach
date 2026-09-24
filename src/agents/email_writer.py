@@ -5,7 +5,7 @@ from typing import Protocol
 from pydantic import BaseModel, Field
 
 from .discovery import Candidate
-from .verifier import VerificationResult
+from .verification import VerificationResult
 
 
 class EmailWriterProvider(Protocol):

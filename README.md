@@ -112,7 +112,7 @@ This agent is separate from the existing CLI workflow. LangGraph integration is 
 
 ## Verification agent
 
-`agents.verifier.VerificationAgent` checks discovery candidates against their official website and linked service pages. Use `verify(candidate, company_type)` for one office or `verify_candidates(candidates, company_type)` for a batch, with `UG` or `GmbH` as the company type.
+`agents.verification.VerificationAgent` checks discovery candidates against their official website and linked service pages. Use `verify(candidate, company_type)` for one office or `verify_candidates(candidates, company_type)` for a batch, with `UG` or `GmbH` as the company type.
 
 Each result includes the candidate, status (`supported`, `unsupported`, or `unknown`), confidence, reasoning, evidence quote, source URL, reviewed pages, and errors. Definite results require a quote found on the cited page. Missing or inconclusive evidence stays `unknown`; `unsupported` is reserved for an explicit statement that the service is not offered. Confidence is a model assessment, not a calibrated probability.
 

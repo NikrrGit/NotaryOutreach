@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from pydantic import BaseModel, ConfigDict, Field
 
 from .email_writer import EmailWriterInput
-from .verifier import VerificationResult
+from .verification import VerificationResult
 
 if TYPE_CHECKING:
     from graph.state import CandidateEmailDraft, EvaluationResult

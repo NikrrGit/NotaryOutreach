@@ -16,7 +16,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 
 from agents.discovery import Candidate
 from agents.email_writer import EmailDraft
-from agents.verifier import VerificationFailure, VerificationResult
+from agents.verification import VerificationFailure, VerificationResult
 
 from .state import CandidateEmailDraft, EvaluationResult, SearchSettings, WorkflowError
 
@@ -41,6 +41,8 @@ def open_checkpointer(
     serde = JsonPlusSerializer(allowed_msgpack_modules=[
         Candidate, EmailDraft, VerificationFailure, VerificationResult,
         CandidateEmailDraft, EvaluationResult, SearchSettings, WorkflowError,
+        ("agents.verifier", "VerificationFailure"),
+        ("agents.verifier", "VerificationResult"),
     ])
     with closing(sqlite3.connect(
         str(database), timeout=30, check_same_thread=False,

@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from agents.verifier import Assessment, PageContent, VerificationAgent
+from agents.verification import Assessment, PageContent, VerificationAgent
 from agents.discovery import Candidate
 from notaryoutreach.providers.groq import assess_formation
 

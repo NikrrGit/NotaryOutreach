@@ -16,7 +16,7 @@ from typing import Any
 
 from agents.discovery import Candidate, DiscoveryAgent, DiscoveryError
 from agents.email_writer import EmailWriter, EmailWriterInput
-from agents.verifier import VerificationAgent, VerificationResult
+from agents.verification import VerificationAgent, VerificationResult
 
 from .state import CandidateEmailDraft, EvaluationResult, WorkflowError, WorkflowState
 

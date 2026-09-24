@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 from agents.discovery import Candidate
 from agents.email_writer import EmailDraft
-from agents.verifier import VerificationResult
+from agents.verification import VerificationResult
 from graph.state import EvaluationResult
 from graph.workflow import build_workflow, create_initial_state
 

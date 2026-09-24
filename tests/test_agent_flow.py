@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from agents.discovery import DiscoveryAgent, DiscoveryError
-from agents.verifier import VerificationAgent
+from agents.verification import VerificationAgent
 
 
 def completion(payload):

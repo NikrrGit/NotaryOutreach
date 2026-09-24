@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 from agents.discovery import Candidate
 from agents.email_writer import EmailDraft, EmailWriter, EmailWriterInput
-from agents.verifier import VerificationAgent, VerificationResult
+from agents.verification import VerificationAgent, VerificationResult
 
 
 def verified(**overrides):

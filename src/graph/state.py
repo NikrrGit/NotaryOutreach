@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agents.discovery import Candidate
 from agents.email_writer import EmailDraft
-from agents.verifier import VerificationResult
+from agents.verification import VerificationResult
 
 
 CompanyType = Literal["UG", "GmbH"]
