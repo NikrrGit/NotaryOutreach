@@ -4,10 +4,37 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
+from uuid import NAMESPACE_URL, uuid5
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+
+
+class OutreachContext(BaseModel):
+    """Validated settings shared by all four agents."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    target_type: Literal["notary", "vc"] = "notary"
+    company_type: Literal["UG", "GmbH"] | None = None
+    location: str | None = Field(default=None, min_length=1)
+    startup_description: str | None = Field(default=None, min_length=1)
+    industry: str | None = Field(default=None, min_length=1)
+    funding_stage: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_target(self):
+        if self.target_type == "notary":
+            if self.company_type is None:
+                raise ValueError("Notary searches require UG or GmbH.")
+            if any((self.startup_description, self.industry, self.funding_stage)):
+                raise ValueError("Startup settings apply only to VC searches.")
+        elif self.company_type is not None or not all((
+            self.location, self.startup_description, self.industry, self.funding_stage,
+        )):
+            raise ValueError("VC searches require location, startup description, industry and funding stage, without company type.")
+        return self
 
 
 class Candidate(BaseModel):
@@ -15,6 +42,10 @@ class Candidate(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid", strict=True)
 
+    id: str = Field(default="", validate_default=True)
+    target_type: Literal["notary", "vc"] = "notary"
+    organization: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     name: str = Field(min_length=1)
     city: str = Field(min_length=1)
     website: str | None = None
@@ -22,6 +53,14 @@ class Candidate(BaseModel):
     phone: str | None = None
     source_url: str
     company_type_hint: str | None = None
+
+    @model_validator(mode="after")
+    def assign_id(self):
+        if not self.id:
+            identity = (self.target_type, self.name.casefold(), self.city.casefold(),
+                        (self.website or self.source_url).rstrip("/"))
+            self.id = str(uuid5(NAMESPACE_URL, json.dumps(identity)))
+        return self
 
     @field_validator("website", "source_url")
     @classmethod
