@@ -134,3 +134,28 @@ class ProviderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VCDiscoveryTests(unittest.TestCase):
+    def test_vc_context_candidates_and_deduplication(self):
+        provider = Mock()
+        provider.search.return_value = json.dumps({"candidates": [
+            {"name": "Example Capital", "city": "Berlin", "organization": "Example Capital",
+             "website": "https://vc.example", "source_url": "https://vc.example/thesis",
+             "metadata": {"role": "Fund", "investment_focus": "Cybersecurity"}},
+        ] * 2})
+        agent = DiscoveryAgent(provider=provider)
+        leads = agent.discover("Germany", target_type="vc", startup_description="Security software",
+                               industry="Cybersecurity", funding_stage="Seed", limit=2)
+        self.assertEqual(len(leads), 1)
+        self.assertEqual(leads[0].target_type, "vc")
+        self.assertEqual(leads[0].organization, "Example Capital")
+        self.assertEqual(leads[0].metadata["investment_focus"], "Cybersecurity")
+        self.assertTrue(leads[0].id)
+        prompt = json.loads(provider.search.call_args.kwargs["prompt"])
+        self.assertEqual(prompt["startup_description"], "Security software")
+        self.assertIn("investment thesis", provider.search.call_args.kwargs["system_prompt"])
+        provider.reset_mock()
+        with self.assertRaises(ValueError):
+            agent.discover("Germany", target_type="vc")
+        provider.search.assert_not_called()
