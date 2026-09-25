@@ -108,3 +108,33 @@ class EmailWriterHandoffTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         self.writer.write_verified(result)
                     self.provider.generate_structured.assert_not_called()
+
+
+class VCEmailWriterTests(unittest.TestCase):
+    def test_vc_draft_uses_verified_fit_and_startup_context(self):
+        verification = VerificationResult(
+            candidate=Candidate(name="Example VC", organization="Example Capital", city="Berlin",
+                                target_type="vc", source_url="https://vc.example"),
+            target_type="vc", location="Germany", startup_description="Security software for SMEs",
+            industry="Cybersecurity", funding_stage="Seed", status="supported", confidence=0.9,
+            reasoning="Sector and stage match", evidence_quote="European seed cybersecurity investments",
+            source_url="https://vc.example/thesis",
+        )
+        provider = Mock()
+        provider.generate_structured.return_value = EmailDraft(subject="Austausch", body="Hätten Sie Zeit für ein Gespräch?")
+        writer = EmailWriter(provider)
+        writer.write_verified(verification, sender_name="Alex", company_name="SecureCo")
+        request = provider.generate_structured.call_args.kwargs
+        data = json.loads(request["user_prompt"])
+        self.assertEqual(data["target_type"], "vc")
+        self.assertEqual(data["organization"], "Example Capital")
+        self.assertEqual(data["startup_description"], verification.startup_description)
+        self.assertEqual(data["evidence"], verification.evidence_quote)
+        self.assertEqual(data["company_name"], "SecureCo")
+        self.assertIn("short conversation", request["system_prompt"])
+        self.assertNotIn("earliest possible notary appointment", request["system_prompt"])
+        provider.reset_mock()
+        for change in ({"status": "unknown"}, {"evidence_quote": None}, {"startup_description": None}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                writer.write_verified(verification.model_copy(update=change))
+        provider.generate_structured.assert_not_called()
