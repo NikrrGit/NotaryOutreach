@@ -139,3 +139,55 @@ class EvaluatorTests(unittest.TestCase):
             with self.subTest(verification=verification), self.assertRaises(ValueError):
                 self.evaluator(self.draft, verification)
         self.provider.generate_structured.assert_not_called()
+
+
+class VCEvaluatorTests(unittest.TestCase):
+    def test_vc_checks_and_verified_handoff(self):
+        candidate = Candidate(name="Example VC", city="Berlin", target_type="vc", source_url="https://vc.example")
+        verification = VerificationResult(
+            candidate=candidate, target_type="vc", location="Germany",
+            startup_description="Security software for SMEs", industry="Cybersecurity", funding_stage="Seed",
+            status="supported", confidence=0.95, reasoning="Sector, stage and geography match.",
+            evidence_quote="European seed cybersecurity investments", source_url="https://vc.example",
+        )
+        provider = Mock()
+        response = dict(passed=True, conversation_requested=True, startup_represented_correctly=True,
+                        investment_fit_supported=True, claims_supported=True, score=0.95,
+                        reasoning="Supported fit and clear request.", issues=[])
+        provider.generate_structured.return_value = response
+        evaluator = EmailEvaluator(provider)
+        draft = CandidateEmailDraft(candidate=candidate, draft=EmailDraft(
+            subject="Security software", body="We build security software for SMEs. Could we have a short conversation?",
+        ))
+        result = evaluator(draft, verification)
+        self.assertTrue(result.passed)
+        self.assertEqual(result.draft_id, draft.draft_id)
+        request = provider.generate_structured.call_args.kwargs
+        data = json.loads(request["user_prompt"])
+        self.assertEqual(data["target_type"], "vc")
+        self.assertEqual(data["startup_description"], verification.startup_description)
+        self.assertEqual(data["evidence"], verification.evidence_quote)
+        self.assertIn("investment-fit", request["system_prompt"])
+        for field in ("conversation_requested", "startup_represented_correctly", "investment_fit_supported", "claims_supported"):
+            with self.subTest(field=field):
+                provider.generate_structured.return_value = {**response, field: False}
+                self.assertFalse(evaluator(draft, verification).passed)
+        for field in ("conversation_requested", "startup_represented_correctly", "investment_fit_supported"):
+            with self.subTest(missing=field):
+                provider.generate_structured.return_value = {key: value for key, value in response.items() if key != field}
+                self.assertFalse(evaluator(draft, verification).passed)
+
+    def test_notary_company_type_must_appear_even_if_provider_passes(self):
+        provider = Mock()
+        provider.generate_structured.return_value = dict(
+            passed=True, appointment_requested=True, correct_company_type=True,
+            claims_supported=True, score=0.95, reasoning="Pass", issues=[],
+        )
+        data = EvaluatorInput(
+            company_type="UG", notary_name="Office", city="Berlin", verification_reason="Offers UG formation",
+            evidence="UG formation", source_url="https://example.org", email_subject="Meeting",
+            email_body="Could we meet?",
+        )
+        result = EmailEvaluator(provider).evaluate(data)
+        self.assertFalse(result.passed)
+        self.assertIn("Requested company type is absent.", result.issues)

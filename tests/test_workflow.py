@@ -214,6 +214,9 @@ class WorkflowTests(unittest.TestCase):
             "correct_company_type": True, "claims_supported": True,
             "score": 0.95, "reasoning": "All checks passed.", "issues": [],
         }
+        self.writer.write_verified.return_value = EmailDraft(
+            subject="UG appointment", body="Could we arrange a UG formation appointment?",
+        )
         self.evaluator = EmailEvaluator(provider)
         state = self.run_graph()
         self.assertEqual(state["status"], "ready_for_review")
