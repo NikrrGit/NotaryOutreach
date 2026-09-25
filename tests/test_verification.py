@@ -310,3 +310,32 @@ class BatchVerificationTests(unittest.TestCase):
             agent.verify_candidates([], "AG")
         provider.assert_not_called()
         reader.assert_not_called()
+
+
+class VCVerificationTests(unittest.TestCase):
+    def test_fit_requires_sourced_evidence_and_preserves_startup_context(self):
+        office = Candidate(name="Example VC", city="Berlin", target_type="vc",
+                           website="https://vc.example", source_url="https://vc.example")
+        quote = "We invest in European cybersecurity companies at seed stage."
+        provider = Mock(return_value=json.dumps(dict(
+            status="supported", confidence=0.95, reasoning="Sector, stage and geography match.",
+            evidence_quote=quote, source_url=office.website,
+        )))
+        reader = Mock(return_value=quote)
+        verifier = VerificationAgent(provider=provider, page_reader=reader)
+        context = dict(target_type="vc", location="Germany", startup_description="Security software",
+                       industry="Cybersecurity", funding_stage="Seed")
+        result = verifier.verify(office, **context)
+        self.assertEqual(result.status, "supported")
+        self.assertIsNone(result.company_type)
+        self.assertEqual(result.startup_description, context["startup_description"])
+        self.assertEqual(json.loads(provider.call_args.args[1])["funding_stage"], "Seed")
+        self.assertIn("investment fit", provider.call_args.args[0])
+        reader.return_value = "Welcome to our website."
+        self.assertEqual(verifier.verify(office, **context).status, "unknown")
+        reader.side_effect = TimeoutError()
+        self.assertEqual(verifier.verify_candidates([office], **context)[0].status, "unknown")
+        with self.assertRaises(ValueError):
+            verifier.verify(office, "UG")
+        with self.assertRaises(ValueError):
+            verifier.verify(office, target_type="vc")

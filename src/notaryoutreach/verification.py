@@ -43,7 +43,8 @@ SYSTEM_PROMPT = (
 )
 
 
-def fetch_page_text(url: str, service_links: list[str] | None = None, max_chars: int = MAX_PAGE_CHARS) -> str:
+def fetch_page_text(url: str, service_links: list[str] | None = None, max_chars: int = MAX_PAGE_CHARS, *,
+                    research_pattern: str | None = None) -> str:
     normalize_url(url)
     request = Request(url, headers={"User-Agent": "Mozilla/5.0"})
     try:
@@ -64,14 +65,14 @@ def fetch_page_text(url: str, service_links: list[str] | None = None, max_chars:
         for href in re.findall(r"href\s*=\s*[\"']([^\"']+)[\"']", raw, flags=re.I):
             link = urljoin(url, unescape(href)).split("#", 1)[0]
             if (urlsplit(link).hostname == urlsplit(url).hostname
-                    and re.search(r"gesellschaft|unternehmen|gr[uü](?:e)?nd|gmbh", link, flags=re.I)
+                    and re.search(research_pattern or r"gesellschaft|unternehmen|gr[uü](?:e)?nd|gmbh", link, flags=re.I)
                     and link != url and link not in service_links):
                 service_links.append(link)
     text = re.sub(r"\s+", " ", unescape(TAG_RE.sub(" ", raw))).replace("\xad", "").strip()
     if len(text) <= max_chars:
         return text
     excerpts = [text[:1200]]
-    for match in re.finditer(r"gesellschaftsgr|unternehmensgr|gmbh|unternehmergesellschaft|gründung|gruendung", text, re.I):
+    for match in re.finditer(research_pattern or r"gesellschaftsgr|unternehmensgr|gmbh|unternehmergesellschaft|gründung|gruendung", text, re.I):
         excerpts.append(text[max(0, match.start() - 200):match.end() + 350])
         if sum(map(len, excerpts)) > max_chars - 1000:
             break
