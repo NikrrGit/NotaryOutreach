@@ -15,6 +15,27 @@ from services.outreach_service import OutreachService
 from storage.sqlite import SQLiteStorage
 
 
+def execute_job(service: OutreachService, job_id: str, *, resume: bool = False) -> None:
+    """Execute an explicit user action and refresh saved results."""
+    try:
+        with st.spinner("Resuming search…" if resume else "Researching contacts and preparing drafts…"):
+            results = service.resume_job(job_id) if resume else service.run_job(job_id)
+        if results["job"]["status"] == "manual_review":
+            st.session_state["notice"] = "Search finished with items needing review. Inspect the results and any reported issues."
+            st.session_state["notice_level"] = "warning"
+        else:
+            st.session_state["notice"] = "Search finished. Review the results and email drafts below."
+            st.session_state["notice_level"] = "success"
+    except Exception:
+        st.session_state["notice"] = (
+            "Search could not finish. Your saved search is available below. "
+            "Check your Groq API key and connection, then use Start or Resume to retry. "
+            "If another search is running, wait for it to finish."
+        )
+        st.session_state["notice_level"] = "error"
+    st.rerun()
+
+
 def render_search(service: OutreachService) -> None:
     """Save settings for either search mode."""
     mode = st.radio("What are you looking for?", ["Notary", "Venture Capital"], horizontal=True)
