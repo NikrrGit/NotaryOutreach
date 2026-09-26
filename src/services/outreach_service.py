@@ -205,3 +205,45 @@ class OutreachService:
             })
         status = state.get("status", "pending")
         self.storage.update_job(job_id, status="running" if status == "pending" else status)
+
+    def _execute(self, job_id: str, *, resume: bool) -> dict[str, Any]:
+        """Run one job at a time in this process, checkpointing each graph step."""
+        job = self.load_job(job_id)
+        if not _EXECUTION_LOCK.acquire(blocking=False):
+            raise RuntimeError("Another workflow or evaluation is already running.")
+        try:
+            thread_id = str(uuid5(NAMESPACE_URL, f"{self.storage.path}:{job_id}"))
+            config = checkpoint_config(thread_id)
+            with open_checkpointer(self.checkpoint_path) as saver:
+                reader = build_workflow(discovery_agent=None, verification_agent=None,
+                                        email_writer=None, evaluator=None, checkpointer=saver)
+                snapshot = reader.get_state(config)
+                exists = snapshot.created_at is not None
+                if resume and not exists:
+                    raise ValueError("No checkpoint exists; start this job with run_job.")
+                if not resume and exists:
+                    raise ValueError("This job already has a checkpoint; use resume_job.")
+                initial = create_initial_state(
+                    **{field: job[field] for field in OutreachContext.model_fields},
+                    target_results=job["target_count"],
+                )
+                if exists and snapshot.values["settings"] != initial["settings"]:
+                    raise ValueError("Checkpoint settings do not match the saved job.")
+                try:
+                    if exists:
+                        self._persist_state(job_id, snapshot.values)
+                        if not snapshot.next:
+                            return self.load_results(job_id)
+                    self.storage.update_job(job_id, status="running")
+                    with self._agent_session() as (discovery, verifier, writer, evaluator):
+                        graph = build_workflow(discovery_agent=discovery, verification_agent=verifier,
+                                               email_writer=writer, evaluator=evaluator, checkpointer=saver)
+                        for state in graph.stream(None if resume else initial, config,
+                                                  stream_mode="values", durability="sync"):
+                            self._persist_state(job_id, state)
+                except Exception:
+                    self.storage.update_job(job_id, status="failed")
+                    raise
+            return self.load_results(job_id)
+        finally:
+            _EXECUTION_LOCK.release()
