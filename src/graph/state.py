@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agents.discovery import Candidate
+from agents.discovery import Candidate, OutreachContext
 from agents.email_writer import EmailDraft
 from agents.verification import VerificationResult
 
@@ -15,19 +15,20 @@ CompanyType = Literal["UG", "GmbH"]
 
 # Search configuration
 
-class SearchSettings(BaseModel):
-    """
-    User-provided configuration for a notary search job.
-    """
+class SearchSettings(OutreachContext):
+    """Search settings for the shared Notary/VC workflow."""
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
     location: str = Field(min_length=1)
-    company_type: CompanyType
     target_count: int = Field(default=20, ge=1, le=100, strict=True)
 
     radius_km: int = Field(default=50, ge=1, le=200, strict=True)
     language: str = Field(default="de", min_length=1)
+
+    def agent_context(self) -> dict:
+        """Return only the shared agent input fields."""
+        return self.model_dump(include=set(OutreachContext.model_fields))
 
 
 # Draft and evaluation state
