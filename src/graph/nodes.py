@@ -18,15 +18,15 @@ from agents.discovery import Candidate, DiscoveryAgent, DiscoveryError
 from agents.email_writer import EmailWriter, EmailWriterInput
 from agents.verification import VerificationAgent, VerificationResult
 
-from .state import CandidateEmailDraft, EvaluationResult, WorkflowError, WorkflowState
+from .state import CandidateEmailDraft, EvaluationResult, SearchSettings, WorkflowError, WorkflowState
 
 EvaluateDraft = Callable[[CandidateEmailDraft, VerificationResult], EvaluationResult]
 SaveDraft = Callable[[CandidateEmailDraft, VerificationResult, EvaluationResult], None]
 
 
 def candidate_key(candidate: Candidate) -> str:
-    """Stable office reference without requiring a new field on Candidate."""
-    return "|".join((candidate.name.casefold(), candidate.city.casefold(),
+    """Stable reference scoped to the candidate target type."""
+    return "|".join((candidate.target_type, candidate.name.casefold(), candidate.city.casefold(),
                      (candidate.website or candidate.source_url).rstrip("/")))
 
 
@@ -40,13 +40,27 @@ def _error(node: str, exc: Exception, candidate: Candidate | None = None) -> Wor
     )
 
 
+def verification_matches(result: VerificationResult, settings: SearchSettings) -> bool:
+    """Require the same target and research criteria."""
+    if result.target_type != settings.target_type or result.candidate.target_type != settings.target_type:
+        return False
+    if result.company_type != settings.company_type:
+        return False
+    if settings.target_type == "vc":
+        return all(getattr(result, field) == getattr(settings, field) for field in (
+            "location", "startup_description", "industry", "funding_stage",
+        ))
+    return True
+
+
 def _verifications(state: WorkflowState) -> dict[str, VerificationResult]:
-    """Use the latest result for each candidate and the requested company type."""
-    company_type = state["settings"].company_type
+    """Select the latest matching verification for each current candidate."""
+    candidates = {candidate_key(item): item for item in state.get("candidates", [])}
     return {
         candidate_key(result.candidate): result
         for result in state.get("verification_results", [])
-        if result.company_type == company_type
+        if verification_matches(result, state["settings"])
+        and candidates.get(candidate_key(result.candidate)) == result.candidate
     }
 
 
@@ -134,7 +148,7 @@ class WorkflowNodes:
         errors: list[WorkflowError] = []
         try:
             candidates = self.discovery.discover(
-                settings.location, settings.company_type, limit=remaining,
+                **settings.agent_context(), limit=remaining,
             )
         except DiscoveryError as exc:
             candidates = exc.candidates
@@ -143,10 +157,15 @@ class WorkflowNodes:
             return {"errors": [_error("discover", exc)]}
         added = []
         for candidate in candidates:
+            if candidate.target_type != settings.target_type:
+                errors.append(_error("discover", ValueError("Wrong target"), candidate))
+                continue
             key = candidate_key(candidate)
             if key not in existing:
                 added.append(candidate)
                 existing.add(key)
+            if len(added) >= remaining:
+                break
         return {"candidates": added, "errors": errors}
 
     def verify(self, state: WorkflowState) -> dict[str, Any]:
@@ -158,7 +177,12 @@ class WorkflowNodes:
             if key in existing:
                 continue
             try:
-                result = self.verifier.verify(candidate, state["settings"].company_type)
+                settings = state["settings"]
+                if candidate.target_type != settings.target_type:
+                    raise ValueError("Candidate target differs from search settings.")
+                result = self.verifier.verify(candidate, **settings.agent_context())
+                if result.candidate != candidate or not verification_matches(result, settings):
+                    raise ValueError("Verification does not match the requested candidate and criteria.")
                 results.append(result)
                 existing[key] = result
                 errors.extend(WorkflowError(
