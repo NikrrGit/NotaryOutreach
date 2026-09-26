@@ -204,7 +204,9 @@ class OutreachService:
                 "reasoning": evaluation.reasoning, "issues_json": evaluation.issues,
             })
         status = state.get("status", "pending")
-        self.storage.update_job(job_id, status="running" if status == "pending" else status)
+        status = "running" if status == "pending" else status
+        if self.load_job(job_id)["status"] != status:
+            self.storage.update_job(job_id, status=status)
 
     def _execute(self, job_id: str, *, resume: bool) -> dict[str, Any]:
         """Run one job at a time in this process, checkpointing each graph step."""

@@ -200,3 +200,27 @@ class WorkflowServiceTests(unittest.TestCase):
             discovery_agent=self.discovery, verification_agent=self.verifier,
             email_writer=self.writer, evaluator=self.evaluator,
         )
+
+    def test_both_targets_persist_and_completed_resume_preserves_reviews(self):
+        for target in ("notary", "vc"):
+            with self.subTest(target=target):
+                settings = dict(company_type="UG") if target == "notary" else dict(
+                    startup_description="Security software", industry="Cybersecurity", funding_stage="Seed",
+                )
+                job_id = self.service.create_job(target_type=target, location="Berlin", **settings)
+                results = self.service.run_job(job_id)
+                self.assertEqual(results["job"]["status"], "ready_for_review")
+                for table in ("candidates", "verifications", "drafts", "evaluations"):
+                    self.assertEqual(len(results[table]), 1)
+                self.assertEqual(results["evaluations"][0]["score"], 0.9)
+                self.assertEqual(results["verifications"][0]["evidence"], "Relevant services")
+                self.service.approve_draft(job_id, results["drafts"][0]["id"])
+                expected = self.service.load_results(job_id)
+                offline = OutreachService(SQLiteStorage(self.path), checkpoint_path=self.checkpoint_path)
+                self.assertEqual(offline.resume_job(job_id), expected)
+                self.assertEqual(offline.resume_job(job_id), expected)
+                with self.assertRaises(ValueError):
+                    self.service.run_job(job_id)
+        self.assertEqual(self.discovery.discover.call_count, 2)
+        self.assertEqual(self.evaluator.call_count, 2)
+        self.assertEqual(len({row["id"] for row in self.storage.list_records("candidates")}), 2)
