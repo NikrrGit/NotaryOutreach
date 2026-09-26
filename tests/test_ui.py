@@ -85,3 +85,37 @@ class UITests(unittest.TestCase):
         self.assertEqual(self.service.load_job(job["id"])["status"], "ready_for_review")
         self.discovery.discover.assert_called_once()
         self.assertEqual(len(self.storage.list_records("candidates")), 1)
+
+    def test_edited_draft_requires_re_evaluation_before_approval(self):
+        app = self.app
+        next(widget for widget in app.text_input if widget.label == "Location").set_value("Berlin")
+        next(button for button in app.button if button.label == "Start search").click().run()
+        job = self.service.list_jobs()[0]
+        original = self.service.load_results(job["id"])["drafts"][0]
+        app.text_area(key=f"body-{original['id']}").set_value("Revised outreach").run()
+        self.assertTrue(app.button(key=f"evaluate-{original['id']}").disabled)
+        self.assertTrue(app.button(key=f"approve-{original['id']}").disabled)
+        app.button(key=f"edit-{original['id']}").click().run()
+        edited = self.service.load_results(job["id"])["drafts"][-1]
+        self.assertNotEqual(edited["id"], original["id"])
+        self.assertTrue(app.button(key=f"approve-{edited['id']}").disabled)
+        app.button(key=f"evaluate-{edited['id']}").click().run()
+        self.assertFalse(app.exception)
+        self.assertFalse(app.button(key=f"approve-{edited['id']}").disabled)
+        app.button(key=f"approve-{edited['id']}").click().run()
+        self.assertFalse(app.exception)
+        self.assertTrue(app.button(key=f"approve-{edited['id']}").disabled)
+        reviews = self.service.load_results(job["id"])["reviews"]
+        self.assertEqual(len(reviews), 1)
+        self.assertEqual(reviews[0]["draft_id"], edited["id"])
+        self.assertEqual(reviews[0]["final_body"], "Revised outreach")
+        calls = self.evaluator.call_count
+        app.run()
+        self.assertEqual(self.evaluator.call_count, calls)
+        self.assertEqual(self.service.load_results(job["id"])["reviews"], reviews)
+        self.evaluator.side_effect = TimeoutError("private provider response")
+        app.button(key=f"evaluate-{edited['id']}").click().run()
+        self.assertFalse(app.exception)
+        self.assertTrue(app.error)
+        self.assertNotIn("private provider response", app.error[0].value)
+        self.assertEqual(len(self.service.load_results(job["id"])["evaluations"]), 2)
