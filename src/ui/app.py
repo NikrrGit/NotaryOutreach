@@ -37,7 +37,7 @@ def execute_job(service: OutreachService, job_id: str, *, resume: bool = False) 
 
 
 def render_search(service: OutreachService) -> None:
-    """Save settings for either search mode."""
+    """Create a search and optionally run it immediately."""
     mode = st.radio("What are you looking for?", ["Notary", "Venture Capital"], horizontal=True)
     target = "notary" if mode == "Notary" else "vc"
     with st.form(f"search-{target}"):
@@ -50,8 +50,9 @@ def render_search(service: OutreachService) -> None:
             settings["industry"] = st.text_input("Industry")
             settings["funding_stage"] = st.selectbox("Funding stage", ["Pre-seed", "Seed", "Series A", "Series B", "Growth"])
         settings["target_count"] = st.number_input("Number of results", min_value=1, max_value=100, value=10, step=1)
+        start = st.form_submit_button("Start search")
         submitted = st.form_submit_button("Save search")
-    if submitted:
+    if start or submitted:
         job_id = st.session_state.setdefault("pending_job_id", str(uuid4()))
         try:
             service.create_job(**settings, job_id=job_id)
@@ -60,7 +61,9 @@ def render_search(service: OutreachService) -> None:
         else:
             st.session_state.pop("pending_job_id", None)
             st.session_state["selected_job"] = job_id
-            st.session_state["notice"] = "Search saved. Execution is not available yet."
+            if start:
+                execute_job(service, job_id)
+            st.session_state["notice"] = "Search saved. Start it from Saved searches when ready."
             st.rerun()
 
 
