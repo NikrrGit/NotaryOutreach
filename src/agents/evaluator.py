@@ -127,6 +127,7 @@ class EmailEvaluator:
         return EvaluationResult(
             draft_id=draft.draft_id, passed=assessment.passed,
             reasoning=assessment.reasoning, issues=assessment.issues,
+            score=assessment.score, claims_supported=assessment.claims_supported,
         )
 
     @staticmethod

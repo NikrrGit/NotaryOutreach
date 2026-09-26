@@ -56,6 +56,8 @@ class EvaluationResult(BaseModel):
 
     draft_id: str = Field(min_length=1)
     passed: bool = Field(strict=True)
+    score: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    claims_supported: bool | None = Field(default=None, strict=True)
     reasoning: str = Field(min_length=1)
     issues: list[str] = Field(default_factory=list)
 
