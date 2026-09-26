@@ -64,3 +64,24 @@ class UITests(unittest.TestCase):
                 self.assertEqual(self.discovery.discover.call_count, calls)
         self.assertEqual(len(self.service.list_jobs()), 2)
         self.assertEqual(self.discovery.discover.call_count, 2)
+
+    def test_saved_search_can_start_and_failed_execution_can_resume(self):
+        app = self.app
+        next(button for button in app.button if button.label == "Start search").click().run()
+        self.assertTrue(app.error)
+        self.assertEqual(self.service.list_jobs(), [])
+        next(widget for widget in app.text_input if widget.label == "Location").set_value("Berlin")
+        next(button for button in app.button if button.label == "Save search").click().run()
+        job = self.service.list_jobs()[0]
+        self.discovery.discover.assert_not_called()
+        with patch.object(self.storage, "save_record", side_effect=OSError("private diagnostic")):
+            app.button(key=f"run-{job['id']}").click().run()
+        self.assertFalse(app.exception)
+        self.assertTrue(app.error)
+        self.assertNotIn("private diagnostic", app.error[0].value)
+        self.assertEqual(app.button(key=f"run-{job['id']}").label, "Resume search")
+        app.button(key=f"run-{job['id']}").click().run()
+        self.assertFalse(app.exception)
+        self.assertEqual(self.service.load_job(job["id"])["status"], "ready_for_review")
+        self.discovery.discover.assert_called_once()
+        self.assertEqual(len(self.storage.list_records("candidates")), 1)
