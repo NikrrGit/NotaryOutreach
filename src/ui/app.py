@@ -193,14 +193,15 @@ def main() -> None:
     st.set_page_config(page_title="Outreach", page_icon="✉", layout="wide")
     st.title("Outreach")
     st.caption("Find relevant contacts. Prepare emails. Review every draft.")
-    st.info("Search execution is not connected yet. You can save search settings and review existing results. No emails are sent.")
+    st.caption("Searches run locally and may take a few minutes. No emails are sent.")
     notice = st.session_state.pop("notice", None)
+    level = st.session_state.pop("notice_level", "success")
     if notice:
-        st.success(notice)
+        {"success": st.success, "warning": st.warning, "error": st.error}.get(level, st.info)(notice)
     try:
         settings = {**dotenv_values(".env"), **os.environ}
         storage = SQLiteStorage(settings.get("DATABASE_PATH") or "data/outreach.db")
-        service = OutreachService(storage)
+        service = OutreachService(storage, checkpoint_path=settings.get("CHECKPOINT_PATH") or "runs/checkpoints.sqlite3")
         render_search(service)
         st.divider()
         render_results(service)
