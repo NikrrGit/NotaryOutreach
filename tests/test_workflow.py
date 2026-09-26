@@ -222,3 +222,172 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(state["status"], "ready_for_review")
         self.assertEqual(state["evaluations"][0].draft_id, state["email_drafts"][0].draft_id)
         provider.generate_structured.assert_called_once()
+
+
+class VCWorkflowTests(unittest.TestCase):
+    def setUp(self):
+        self.context = dict(target_type="vc", location="Germany", startup_description="Security software",
+                            industry="Cybersecurity", funding_stage="Seed")
+        self.candidate = Candidate(name="Example VC", city="Berlin", target_type="vc",
+                                   source_url="https://vc.example")
+        self.verification = VerificationResult(
+            candidate=self.candidate, **self.context, status="supported", confidence=0.95,
+            reasoning="Sector, stage and geography match.",
+            evidence_quote="European cybersecurity investments at seed stage.", source_url="https://vc.example",
+        )
+        self.discovery, self.verifier, self.writer = Mock(), Mock(), Mock()
+        self.discovery.discover.return_value = [self.candidate]
+        self.verifier.verify.return_value = self.verification
+        self.writer.write_verified.return_value = EmailDraft(subject="Security software", body="Could we have a conversation?")
+        self.provider = Mock()
+        self.provider.generate_structured.return_value = dict(
+            passed=True, conversation_requested=True, startup_represented_correctly=True,
+            investment_fit_supported=True, claims_supported=True, score=0.95, reasoning="Supported", issues=[],
+        )
+
+    def build(self, checkpointer=None):
+        from agents.evaluator import EmailEvaluator
+
+        return build_workflow(discovery_agent=self.discovery, verification_agent=self.verifier,
+                              email_writer=self.writer, evaluator=EmailEvaluator(self.provider),
+                              checkpointer=checkpointer)
+
+    def test_vc_success_preserves_context_and_review_gate(self):
+        state = self.build().invoke(create_initial_state(**self.context, target_results=3))
+        self.assertEqual(state["status"], "ready_for_review")
+        self.assertEqual(state["settings"].agent_context(), {**self.context, "company_type": None})
+        self.discovery.discover.assert_called_once_with(**self.context, company_type=None, limit=3)
+        self.verifier.verify.assert_called_once_with(self.candidate, **self.context, company_type=None)
+        self.assertEqual(len(state["email_drafts"]), 1)
+        self.assertTrue(state["evaluations"][0].passed)
+        self.assertEqual(state["errors"], [])
+
+    def test_vc_retries_unknown_results_and_failed_drafts(self):
+        self.verifier.verify.side_effect = [
+            self.verification.model_copy(update={"status": "unknown"}), self.verification,
+        ]
+        passed = self.provider.generate_structured.return_value
+        self.provider.generate_structured.side_effect = [
+            {**passed, "investment_fit_supported": False}, passed,
+        ]
+        state = self.build().invoke(create_initial_state(**self.context))
+        self.assertEqual(state["status"], "ready_for_review")
+        self.assertEqual(state["retry_counts"]["verification"], 1)
+        self.assertEqual(state["retry_counts"]["email_generation"], 1)
+        self.assertEqual(len({draft.draft_id for draft in state["email_drafts"]}), 2)
+        self.assertEqual([result.passed for result in state["evaluations"]], [False, True])
+
+    def test_vc_mismatched_context_is_rejected_with_bounded_retries(self):
+        for changes in ({"funding_stage": "Series A"}, {"startup_description": "A different startup"},
+                        {"target_type": "notary", "company_type": "UG"}):
+            with self.subTest(changes=changes):
+                self.verifier.verify.reset_mock()
+                self.verifier.verify.return_value = self.verification.model_copy(update=changes)
+                state = self.build().invoke(create_initial_state(**self.context))
+                self.assertEqual(state["status"], "manual_review")
+                self.assertEqual(state["verification_results"], [])
+                self.assertEqual(self.verifier.verify.call_count, 3)
+                self.assertEqual(state["email_drafts"], [])
+        self.writer.write_verified.assert_not_called()
+
+    def test_vc_negative_evidence_and_wrong_target_discovery(self):
+        self.verifier.verify.return_value = self.verification.model_copy(update={"status": "unsupported"})
+        state = self.build().invoke(create_initial_state(**self.context))
+        self.assertEqual(state["status"], "manual_review")
+        self.assertEqual(state["retry_counts"]["verification"], 0)
+        self.writer.write_verified.assert_not_called()
+        self.verifier.verify.return_value = self.verification.model_copy(update={
+            "status": "unsupported", "evidence_quote": None,
+        })
+        state = self.build().invoke(create_initial_state(**self.context))
+        self.assertEqual(state["retry_counts"]["verification"], 2)
+        self.writer.write_verified.assert_not_called()
+        self.discovery.discover.return_value = [self.candidate.model_copy(update={"target_type": "notary"})]
+        state = self.build().invoke(create_initial_state(**self.context))
+        self.assertEqual(state["candidates"], [])
+        self.assertEqual(state["errors"][0].node, "discover")
+
+    def test_vc_checkpoint_resume_preserves_context_without_replaying_agents(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from graph.checkpointing import open_checkpointer, start_job, resume_job
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "checkpoints.sqlite3"
+            with open_checkpointer(path) as saver:
+                original = start_job(self.build(saver), thread_id="vc-job",
+                                     initial_state=create_initial_state(**self.context))
+            with open_checkpointer(path) as saver:
+                resumed = resume_job(self.build(saver), thread_id="vc-job")
+            self.assertEqual(resumed, original)
+            self.assertEqual(resumed["settings"].target_type, "vc")
+            self.assertEqual(resumed["verification_results"][0].startup_description, "Security software")
+            self.discovery.discover.assert_called_once()
+            self.verifier.verify.assert_called_once()
+            self.writer.write_verified.assert_called_once()
+
+    def test_vc_settings_and_standalone_routing(self):
+        from graph.routing import route_after_evaluation
+
+        for changes in ({"startup_description": None}, {"industry": " "},
+                        {"funding_stage": None}, {"company_type": "UG"}, {"target_type": "other"}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                create_initial_state(**{**self.context, **changes})
+        state = {"target_type": "vc", "evaluation": self.provider.generate_structured.return_value,
+                 "retry_counts": {"email_generation": 0}}
+        self.assertEqual(route_after_evaluation(state), "continue")
+        state["evaluation"] = {**state["evaluation"], "conversation_requested": False}
+        self.assertEqual(route_after_evaluation(state), "retry")
+        state["retry_counts"]["email_generation"] = 2
+        self.assertEqual(route_after_evaluation(state), "manual_review")
+
+    def test_vc_graph_connects_real_agents_with_mocked_providers(self):
+        import json
+        from agents.discovery import DiscoveryAgent
+        from agents.verification import VerificationAgent
+        from agents.email_writer import EmailWriter
+        from agents.evaluator import EmailEvaluator
+
+        search = Mock()
+        search.search.return_value = json.dumps({"candidates": [{
+            "name": "Example VC", "city": "Berlin", "website": "https://vc.example",
+            "source_url": "https://vc.example",
+        }]})
+        assessment = Mock(return_value=json.dumps({
+            "status": "supported", "confidence": 0.95, "reasoning": "Stage and sector fit in Europe.",
+            "evidence_quote": self.verification.evidence_quote, "source_url": "https://vc.example",
+        }))
+        writer = Mock()
+        writer.generate_structured.return_value = self.writer.write_verified.return_value
+        graph = build_workflow(
+            discovery_agent=DiscoveryAgent(provider=search),
+            verification_agent=VerificationAgent(provider=assessment, page_reader=Mock(return_value=self.verification.evidence_quote)),
+            email_writer=EmailWriter(writer), evaluator=EmailEvaluator(self.provider),
+        )
+        state = graph.invoke(create_initial_state(**self.context, target_results=1))
+        self.assertEqual(state["status"], "ready_for_review")
+        self.assertEqual(state["errors"], [])
+        self.assertEqual(state["candidates"][0].target_type, "vc")
+        for provider in (writer, self.provider):
+            request = json.loads(provider.generate_structured.call_args.kwargs["user_prompt"])
+            self.assertEqual(request["startup_description"], self.context["startup_description"])
+            self.assertEqual(request["funding_stage"], "Seed")
+
+    def test_vc_resume_after_verification_does_not_repeat_research(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from graph.checkpointing import checkpoint_config, open_checkpointer, resume_job
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "checkpoints.sqlite3"
+            with open_checkpointer(path) as saver:
+                graph = self.build(saver)
+                graph.invoke(create_initial_state(**self.context), checkpoint_config("paused-vc"),
+                             interrupt_after=["verify"], durability="sync")
+                self.writer.write_verified.assert_not_called()
+            with open_checkpointer(path) as saver:
+                state = resume_job(self.build(saver), thread_id="paused-vc")
+            self.assertEqual(state["status"], "ready_for_review")
+            self.discovery.discover.assert_called_once()
+            self.verifier.verify.assert_called_once()
+            self.writer.write_verified.assert_called_once()
