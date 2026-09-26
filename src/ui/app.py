@@ -140,6 +140,15 @@ def render_results(service: OutreachService) -> None:
     results = service.load_results(job_id)
     job = results["job"]
     st.caption(f"Status: {job['status']} · Requested results: {job['target_count']}")
+    if job["status"] not in ("ready_for_review", "manual_review", "completed"):
+        resume = results["has_checkpoint"]
+        if st.button("Resume search" if resume else "Start saved search", key=f"run-{job_id}"):
+            execute_job(service, job_id, resume=resume)
+    if results.get("workflow_errors"):
+        with st.expander("Search issues"):
+            for error in results["workflow_errors"]:
+                st.text(f"{error['node']}: {error['message']}")
+
     with st.expander("Search settings"):
         for field in ("location", "company_type", "startup_description", "industry", "funding_stage"):
             if job.get(field):
