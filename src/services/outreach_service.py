@@ -168,3 +168,40 @@ class OutreachService:
         finally:
             if provider is not None:
                 provider.client.close()
+
+    def _persist_state(self, job_id: str, state: dict) -> None:
+        """Project checkpoint history into replay-safe application records."""
+        candidate_ids = {}
+        for candidate in state.get("candidates", []):
+            key = candidate_key(candidate)
+            record_id = str(uuid5(NAMESPACE_URL, f"{job_id}:candidate:{key}"))
+            candidate_ids[key] = record_id
+            self.storage.save_record("candidates", {
+                "id": record_id, "job_id": job_id, "target_type": candidate.target_type,
+                "name": candidate.name, "organization": candidate.organization, "city": candidate.city,
+                "website": candidate.website, "email": candidate.email, "phone": candidate.phone,
+                "source_url": candidate.source_url,
+                "metadata_json": {**candidate.metadata, "_agent_record": candidate.model_dump(mode="json")},
+            })
+        for index, verification in enumerate(state.get("verification_results", [])):
+            self.storage.save_record("verifications", {
+                "id": str(uuid5(NAMESPACE_URL, f"{job_id}:verification:{index}")),
+                "candidate_id": candidate_ids[candidate_key(verification.candidate)],
+                "eligible": {"supported": True, "unsupported": False, "unknown": None}[verification.status],
+                "confidence": verification.confidence, "reason": verification.reasoning,
+                "evidence": verification.evidence_quote, "source_url": verification.source_url,
+            })
+        for draft in state.get("email_drafts", []):
+            self.storage.save_record("drafts", {
+                "id": draft.draft_id, "candidate_id": candidate_ids[candidate_key(draft.candidate)],
+                "subject": draft.draft.subject, "body": draft.draft.body,
+            })
+        for index, evaluation in enumerate(state.get("evaluations", [])):
+            self.storage.save_record("evaluations", {
+                "id": str(uuid5(NAMESPACE_URL, f"{job_id}:evaluation:{index}")),
+                "draft_id": evaluation.draft_id, "passed": evaluation.passed and not evaluation.issues,
+                "score": getattr(evaluation, "score", None),
+                "reasoning": evaluation.reasoning, "issues_json": evaluation.issues,
+            })
+        status = state.get("status", "pending")
+        self.storage.update_job(job_id, status="running" if status == "pending" else status)
