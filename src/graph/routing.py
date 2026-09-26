@@ -63,126 +63,86 @@ def _retry_or_manual_review(
     return "manual_review"
 
 
-def route_after_verification(
-    state: Any,
-    max_retries: int = DEFAULT_MAX_RETRIES,
-) -> Route:
-    """
-    Decide what happens after the verification agent.
+def verification_resolved(result: Any) -> bool:
+    """Require evidence for both positive and negative conclusions."""
+    from agents.discovery import Candidate
+    from agents.email_writer import EmailWriterInput
 
-    Continue only when:
-        - verification says the candidate is supported/relevant
-        - evidence exists
-        - a source URL exists
+    try:
+        if result.status == "unsupported":
+            if not result.reasoning.strip() or not result.evidence_quote or not result.evidence_quote.strip():
+                return False
+            if not result.source_url:
+                return False
+            Candidate.validate_url(result.source_url)
+            return True
+        EmailWriterInput.from_verification(result)
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return True
 
-    Retry incomplete verification.
 
-    After the retry budget is exhausted, request manual review.
-    """
-    verification = _get_values(state, "verification")
+def passing_drafts(state: Any) -> dict:
+    """Keep only the latest draft with a passing evaluation and matching evidence."""
+    from .nodes import _verifications, candidate_key
 
-    if verification is None:
-        return _retry_or_manual_review(
-            state,
-            stage="verification",
-            max_retries=max_retries,
+    verifications = _verifications(state)
+    evaluations = {item.draft_id: item for item in state.get("evaluations", [])}
+    latest = {candidate_key(item.candidate): item for item in state.get("email_drafts", [])}
+    return {
+        key: draft for key, draft in latest.items()
+        if key in verifications and verifications[key].candidate == draft.candidate
+        and verifications[key].status == "supported" and verification_resolved(verifications[key])
+        and (result := evaluations.get(draft.draft_id)) is not None
+        and result.passed and not result.issues
+    }
+
+
+def route_after_verification(state: Any, max_retries: int = DEFAULT_MAX_RETRIES) -> Route:
+    """Continue a resolved batch; retry unknown or missing results."""
+    if _get_values(state, "settings") is not None:
+        from .nodes import _verifications, candidate_key
+
+        results = _verifications(state)
+        candidates = state.get("candidates", [])
+        if candidates and all(
+            (result := results.get(candidate_key(candidate))) is not None
+            and verification_resolved(result) for candidate in candidates
+        ):
+            return "continue"
+    else:
+        verification = _get_values(state, "verification")
+        if _get_values(verification, "status") is not None:
+            if verification_resolved(verification):
+                return "continue"
+        else:
+            supported = _get_values(verification, "supported", _get_values(verification, "eligible"))
+            if supported is True and _get_values(verification, "evidence") and _get_values(verification, "source_url"):
+                return "continue"
+    return _retry_or_manual_review(state, "verification", max_retries)
+
+
+def route_after_evaluation(state: Any, max_retries: int = DEFAULT_MAX_RETRIES) -> Route:
+    """Route batch results or a target-specific standalone assessment."""
+    if _get_values(state, "settings") is not None:
+        from .nodes import _verifications
+
+        required = {key for key, result in _verifications(state).items() if result.status == "supported"}
+        if not required:
+            return "manual_review"
+        if required <= passing_drafts(state).keys():
+            return "continue"
+    else:
+        evaluation = _get_values(state, "evaluation")
+        target = _get_values(state, "target_type", "notary")
+        checks = ("appointment_requested", "correct_company_type") if target == "notary" else (
+            "conversation_requested", "startup_represented_correctly", "investment_fit_supported",
         )
-
-    supported = _get_values(
-        verification,
-        "supported",
-        _get_values(verification, "eligible", False),
-    )
-
-    evidence = _get_values(verification, "evidence")
-    source_url = _get_values(verification, "source_url")
-
-    verification_complete = bool(
-        supported
-        and evidence
-        and source_url
-    )
-
-    if verification_complete:
-        return "continue"
-
-    return _retry_or_manual_review(
-        state,
-        stage="verification",
-        max_retries=max_retries,
-    )
-
-def route_after_evaluation(
-    state: Any,
-    max_retries: int = DEFAULT_MAX_RETRIES,
-) -> Route:
-    """
-    Decide what happens after the evaluator.
-
-    The evaluator currently checks:
-
-        appointment_requested
-        correct_company_type
-        claims_supported
-        passed
-
-    A draft continues only when every required safety/quality
-    condition passed.
-
-    Failed drafts may be regenerated up to the retry limit.
-    """
-    evaluation = _get_values(state, "evaluation")
-
-    if evaluation is None:
-        return _retry_or_manual_review(
-            state,
-            stage="email_generation",
-            max_retries=max_retries,
-        )
-
-    passed = bool(_get_values(evaluation, "passed", False))
-
-    appointment_requested = bool(
-        _get_values(
-            evaluation,
-            "appointment_requested",
-            False,
-        )
-    )
-
-    correct_company_type = bool(
-        _get_values(
-            evaluation,
-            "correct_company_type",
-            False,
-        )
-    )
-
-    claims_supported = bool(
-        _get_values(
-            evaluation,
-            "claims_supported",
-            False,
-        )
-    )
-
-    all_checks_passed = all(
-        [
-            passed,
-            appointment_requested,
-            correct_company_type,
-            claims_supported,
-        ]
-    )
-
-    if all_checks_passed:
-        return "continue"
-
-    return _retry_or_manual_review(
-        state,
-        stage="email_generation",
-        max_retries=max_retries,
-    )
+        if target in ("notary", "vc") and all(
+            _get_values(evaluation, field) is True for field in ("passed", "claims_supported", *checks)
+        ) and not _get_values(evaluation, "issues", []):
+            return "continue"
+    return _retry_or_manual_review(state, "email_generation", max_retries)
 
 
 def route_on_error(
