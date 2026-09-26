@@ -255,3 +255,55 @@ class OutreachService:
     def resume_job(self, job_id: str) -> dict[str, Any]:
         """Resume an existing checkpoint or reload its completed results."""
         return self._execute(job_id, resume=True)
+
+    def evaluate_draft(self, job_id: str, draft_id: str, *, evaluation_id: str | None = None) -> str:
+        """Evaluate an exact saved version against its latest verified evidence."""
+        if not _EXECUTION_LOCK.acquire(blocking=False):
+            raise RuntimeError("Another workflow or evaluation is already running.")
+        try:
+            results = self.load_results(job_id)
+            draft = next((item for item in results["drafts"] if item["id"] == draft_id), None)
+            if draft is None:
+                raise KeyError(draft_id)
+            if evaluation_id is not None:
+                existing = self.storage.get_record("evaluations", evaluation_id)
+                if existing is not None:
+                    if existing["draft_id"] != draft_id:
+                        raise ValueError("Evaluation ID belongs to a different draft.")
+                    return evaluation_id
+            stored_candidate = next(item for item in results["candidates"] if item["id"] == draft["candidate_id"])
+            raw_candidate = stored_candidate["metadata_json"].get("_agent_record")
+            if raw_candidate is None:
+                raw_candidate = {field: stored_candidate[field] for field in (
+                    "id", "target_type", "name", "organization", "city", "website", "email", "phone", "source_url",
+                )}
+                raw_candidate["metadata"] = stored_candidate["metadata_json"]
+            candidate = Candidate.model_validate(raw_candidate)
+            verifications = [item for item in results["verifications"] if item["candidate_id"] == draft["candidate_id"]]
+            if not verifications or verifications[-1]["eligible"] is not True:
+                raise ValueError("A supported verification is required to evaluate this draft.")
+            evidence = verifications[-1]
+            verification = VerificationResult(
+                candidate=candidate, **{field: results["job"][field] for field in OutreachContext.model_fields},
+                status="supported", confidence=evidence["confidence"], reasoning=evidence["reason"],
+                evidence_quote=evidence["evidence"], source_url=evidence["source_url"],
+            )
+            EmailWriterInput.from_verification(verification)
+            record = CandidateEmailDraft(draft_id=draft_id, candidate=candidate,
+                                         draft=EmailDraft(subject=draft["subject"], body=draft["body"]))
+            with self._agent_session(evaluation_only=True) as (_, _, _, evaluator):
+                assessment = evaluator(record, verification)
+            if isinstance(assessment, EvaluationResult):
+                assessment = assessment.model_dump()
+            assessment = EvaluationResult.model_validate(assessment)
+            if assessment.draft_id != draft_id:
+                raise ValueError("Evaluation references a different draft.")
+            payload = {
+                "draft_id": draft_id, "passed": assessment.passed and not assessment.issues,
+                "score": assessment.score, "reasoning": assessment.reasoning, "issues_json": assessment.issues,
+            }
+            if evaluation_id is not None:
+                payload["id"] = evaluation_id
+            return self.storage.save_record("evaluations", payload)
+        finally:
+            _EXECUTION_LOCK.release()
