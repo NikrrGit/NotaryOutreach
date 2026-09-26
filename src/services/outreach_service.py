@@ -146,3 +146,25 @@ class OutreachService:
     def reject_draft(self, job_id: str, draft_id: str, *, review_id: str | None = None) -> str:
         """Record rejection while preserving earlier reviews."""
         return self._review_draft(job_id, draft_id, decision="rejected", review_id=review_id)
+
+    @contextmanager
+    def _agent_session(self, *, evaluation_only: bool = False):
+        """Create missing agents lazily and close owned Groq clients."""
+        discovery, verifier, writer, evaluator = self.agents
+        provider = None
+        try:
+            if evaluator is None or (not evaluation_only and writer is None):
+                from providers.groq import GroqProvider
+
+                values = {**dotenv_values(self.env_file), **os.environ}
+                provider = GroqProvider(api_key=values.get("GROQ_API_KEY"))
+            if evaluator is None:
+                evaluator = EmailEvaluator(provider)
+            if not evaluation_only:
+                discovery = discovery if discovery is not None else DiscoveryAgent(env_file=str(self.env_file))
+                verifier = verifier if verifier is not None else VerificationAgent(env_file=str(self.env_file))
+                writer = writer if writer is not None else EmailWriter(provider)
+            yield discovery, verifier, writer, evaluator
+        finally:
+            if provider is not None:
+                provider.client.close()
