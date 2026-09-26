@@ -251,3 +251,7 @@ class OutreachService:
     def run_job(self, job_id: str) -> dict[str, Any]:
         """Start a saved search and persist each completed graph step."""
         return self._execute(job_id, resume=False)
+
+    def resume_job(self, job_id: str) -> dict[str, Any]:
+        """Resume an existing checkpoint or reload its completed results."""
+        return self._execute(job_id, resume=True)
