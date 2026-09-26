@@ -240,3 +240,41 @@ class WorkflowServiceTests(unittest.TestCase):
         self.discovery.discover.assert_called_once()
         self.verifier.verify.assert_called_once()
         self.assertEqual(self.storage.save_record, save)
+
+    def test_edited_draft_evaluation_is_versioned_and_preserves_reviews(self):
+        from graph.state import EvaluationResult
+
+        job_id = self.service.create_job(target_type="vc", location="Germany", startup_description="Security software",
+                                         industry="Cybersecurity", funding_stage="Seed")
+        results = self.service.run_job(job_id)
+        original = results["drafts"][0]
+        self.service.approve_draft(job_id, original["id"])
+        edited = self.service.edit_email(job_id, original["id"], subject="New subject", body="Revised outreach")
+        with self.assertRaises(ValueError):
+            self.service.approve_draft(job_id, edited)
+        evaluation_id = self.service.evaluate_draft(job_id, edited, evaluation_id="edit-evaluation")
+        self.assertEqual(evaluation_id, "edit-evaluation")
+        record, verification = self.evaluator.call_args.args
+        self.assertEqual(record.draft_id, edited)
+        self.assertEqual(record.draft.body, "Revised outreach")
+        self.assertEqual(verification.startup_description, "Security software")
+        self.assertEqual(verification.evidence_quote, "Relevant services")
+        calls = self.evaluator.call_count
+        self.assertEqual(self.service.evaluate_draft(job_id, edited, evaluation_id=evaluation_id), evaluation_id)
+        self.assertEqual(self.evaluator.call_count, calls)
+        self.service.approve_draft(job_id, edited)
+        reviews = self.service.load_results(job_id)["reviews"]
+        self.assertEqual([review["draft_id"] for review in reviews], [original["id"], edited])
+        self.evaluator.side_effect = None
+        self.evaluator.return_value = EvaluationResult(draft_id=edited, passed=False, reasoning="Unsupported claim",
+                                                       issues=["Unsupported claim"], score=0.2)
+        self.service.evaluate_draft(job_id, edited)
+        with self.assertRaises(ValueError):
+            self.service.approve_draft(job_id, edited)
+        self.assertEqual(self.service.load_results(job_id)["reviews"], reviews)
+        self.assertEqual(self.storage.get_record("drafts", original["id"]), original)
+        self.evaluator.side_effect = TimeoutError("Unavailable")
+        before = self.service.load_results(job_id)["evaluations"]
+        with self.assertRaises(TimeoutError):
+            self.service.evaluate_draft(job_id, edited)
+        self.assertEqual(self.service.load_results(job_id)["evaluations"], before)
