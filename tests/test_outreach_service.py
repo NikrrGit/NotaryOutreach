@@ -278,3 +278,16 @@ class WorkflowServiceTests(unittest.TestCase):
         with self.assertRaises(TimeoutError):
             self.service.evaluate_draft(job_id, edited)
         self.assertEqual(self.service.load_results(job_id)["evaluations"], before)
+
+    def test_partial_results_and_errors_survive_reopening(self):
+        self.verifier.verify.side_effect = TimeoutError("Private provider response")
+        job_id = self.service.create_job(target_type="notary", location="Berlin", company_type="UG")
+        results = self.service.run_job(job_id)
+        self.assertEqual(results["job"]["status"], "manual_review")
+        self.assertEqual(len(results["candidates"]), 1)
+        self.assertEqual(results["drafts"], [])
+        self.assertEqual(len(results["workflow_errors"]), 3)
+        self.assertNotIn("Private provider", str(results))
+        reopened = OutreachService(SQLiteStorage(self.path), checkpoint_path=self.checkpoint_path)
+        self.assertEqual(reopened.resume_job(job_id), results)
+        self.assertEqual(self.verifier.verify.call_count, 3)
