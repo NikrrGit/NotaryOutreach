@@ -247,3 +247,7 @@ class OutreachService:
             return self.load_results(job_id)
         finally:
             _EXECUTION_LOCK.release()
+
+    def run_job(self, job_id: str) -> dict[str, Any]:
+        """Start a saved search and persist each completed graph step."""
+        return self._execute(job_id, resume=False)
