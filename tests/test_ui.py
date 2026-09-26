@@ -44,3 +44,23 @@ class UITests(unittest.TestCase):
         self.addCleanup(environment.stop)
         self.app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "src/ui/app.py"), default_timeout=15).run()
         self.assertFalse(self.app.exception)
+
+    def test_both_search_modes_execute_only_on_submit(self):
+        app = self.app
+        for target in ("Notary", "Venture Capital"):
+            with self.subTest(target=target):
+                app.radio[0].set_value(target).run()
+                next(widget for widget in app.text_input if widget.label.startswith("Location")).set_value("Berlin")
+                if target == "Venture Capital":
+                    next(widget for widget in app.text_area if widget.label == "Startup description").set_value("Security software")
+                    next(widget for widget in app.text_input if widget.label == "Industry").set_value("Cybersecurity")
+                next(button for button in app.button if button.label == "Start search").click().run()
+                self.assertFalse(app.exception)
+                job = self.service.list_jobs()[0]
+                self.assertEqual(job["status"], "ready_for_review")
+                self.assertEqual(job["target_type"], "notary" if target == "Notary" else "vc")
+                calls = self.discovery.discover.call_count
+                app.run()
+                self.assertEqual(self.discovery.discover.call_count, calls)
+        self.assertEqual(len(self.service.list_jobs()), 2)
+        self.assertEqual(self.discovery.discover.call_count, 2)
