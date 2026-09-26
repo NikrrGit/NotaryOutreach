@@ -166,3 +166,37 @@ class OutreachServiceTests(unittest.TestCase):
                     self.service.edit_email(job_id, draft_id, subject="Changed", body="Changed")
         for target, expected in before.items():
             self.assertEqual(self.service.load_results(target), expected)
+
+
+class WorkflowServiceTests(unittest.TestCase):
+    def setUp(self):
+        from unittest.mock import Mock
+        from agents.discovery import Candidate
+        from agents.email_writer import EmailDraft
+        from agents.verification import VerificationResult
+        from graph.state import EvaluationResult
+
+        directory = TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.path = Path(directory.name) / "outreach.db"
+        self.checkpoint_path = Path(directory.name) / "checkpoints.sqlite3"
+        self.storage = SQLiteStorage(self.path)
+        self.discovery, self.verifier, self.writer, self.evaluator = Mock(), Mock(), Mock(), Mock()
+        self.discovery.discover.side_effect = lambda **settings: [Candidate(
+            name="Example", city="Berlin", target_type=settings["target_type"],
+            website="https://example.org", source_url="https://example.org",
+        )]
+        self.verifier.verify.side_effect = lambda candidate, **context: VerificationResult(
+            candidate=candidate, **context, status="supported", confidence=0.95,
+            reasoning="Supported by official evidence", evidence_quote="Relevant services",
+            source_url="https://example.org",
+        )
+        self.writer.write_verified.return_value = EmailDraft(subject="Enquiry", body="Could we discuss a UG appointment?")
+        self.evaluator.side_effect = lambda draft, verification: EvaluationResult(
+            draft_id=draft.draft_id, passed=True, score=0.9, claims_supported=True, reasoning="Supported",
+        )
+        self.service = OutreachService(
+            self.storage, checkpoint_path=self.checkpoint_path,
+            discovery_agent=self.discovery, verification_agent=self.verifier,
+            email_writer=self.writer, evaluator=self.evaluator,
+        )
