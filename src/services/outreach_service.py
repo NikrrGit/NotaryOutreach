@@ -3,15 +3,42 @@
 from __future__ import annotations
 
 from typing import Any, Literal
+from contextlib import contextmanager
+from pathlib import Path
+from threading import Lock
+from uuid import NAMESPACE_URL, uuid5
+
+from dotenv import dotenv_values
+import os
+
+from agents.discovery import Candidate, DiscoveryAgent, OutreachContext
+from agents.email_writer import EmailDraft, EmailWriter, EmailWriterInput
+from agents.evaluator import EmailEvaluator
+from agents.verification import VerificationAgent, VerificationResult
+from graph.checkpointing import checkpoint_config, open_checkpointer
+from graph.nodes import candidate_key
+from graph.state import CandidateEmailDraft, EvaluationResult
+from graph.workflow import build_workflow, create_initial_state
 
 from storage.sqlite import SQLiteStorage
 
 
-class OutreachService:
-    """Manage saved results; workflow execution is connected separately."""
+_EXECUTION_LOCK = Lock()
 
-    def __init__(self, storage: SQLiteStorage | None = None) -> None:
+
+class OutreachService:
+    """Run local searches and manage draft review without sending emails."""
+
+    def __init__(
+        self, storage: SQLiteStorage | None = None, *,
+        checkpoint_path: str | Path = "runs/checkpoints.sqlite3",
+        discovery_agent=None, verification_agent=None, email_writer=None, evaluator=None,
+        env_file: str | Path = ".env",
+    ) -> None:
         self.storage = storage if storage is not None else SQLiteStorage()
+        self.checkpoint_path = Path(checkpoint_path)
+        self.env_file = Path(env_file)
+        self.agents = (discovery_agent, verification_agent, email_writer, evaluator)
 
     def create_job(
         self, *, target_type: Literal["notary", "vc"], location: str,
