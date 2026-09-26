@@ -91,6 +91,16 @@ class OutreachService:
         results = {"job": self.load_job(job_id)}
         for table in ("candidates", "verifications", "drafts", "evaluations", "reviews"):
             results[table] = self.storage.list_records(table, job_id=job_id)
+        results["workflow_errors"] = []
+        results["verification_history"] = []
+        if self.checkpoint_path.is_file():
+            thread_id = str(uuid5(NAMESPACE_URL, f"{self.storage.path}:{job_id}"))
+            with open_checkpointer(self.checkpoint_path) as saver:
+                checkpoint = saver.get_tuple(checkpoint_config(thread_id))
+            if checkpoint is not None:
+                state = checkpoint.checkpoint["channel_values"]
+                results["workflow_errors"] = [item.model_dump() for item in state.get("errors", [])]
+                results["verification_history"] = [item.model_dump() for item in state.get("verification_results", [])]
         return results
 
     def edit_email(
