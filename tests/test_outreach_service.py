@@ -224,3 +224,19 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertEqual(self.discovery.discover.call_count, 2)
         self.assertEqual(self.evaluator.call_count, 2)
         self.assertEqual(len({row["id"] for row in self.storage.list_records("candidates")}), 2)
+
+    def test_resume_repairs_partial_storage_writes_without_repeating_discovery(self):
+        from unittest.mock import patch
+
+        job_id = self.service.create_job(target_type="notary", location="Berlin", company_type="UG")
+        save = self.storage.save_record
+        with patch.object(self.storage, "save_record", side_effect=OSError("Disk unavailable")):
+            with self.assertRaises(OSError):
+                self.service.run_job(job_id)
+        self.assertEqual(self.service.load_job(job_id)["status"], "failed")
+        recovered = self.service.resume_job(job_id)
+        self.assertEqual(recovered["job"]["status"], "ready_for_review")
+        self.assertEqual(len(recovered["candidates"]), 1)
+        self.discovery.discover.assert_called_once()
+        self.verifier.verify.assert_called_once()
+        self.assertEqual(self.storage.save_record, save)
