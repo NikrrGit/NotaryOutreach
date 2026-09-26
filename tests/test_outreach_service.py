@@ -291,3 +291,23 @@ class WorkflowServiceTests(unittest.TestCase):
         reopened = OutreachService(SQLiteStorage(self.path), checkpoint_path=self.checkpoint_path)
         self.assertEqual(reopened.resume_job(job_id), results)
         self.assertEqual(self.verifier.verify.call_count, 3)
+
+    def test_job_isolation_and_invalid_execution_references(self):
+        first = self.service.create_job(target_type="notary", location="Berlin", company_type="UG")
+        second = self.service.create_job(target_type="notary", location="Berlin", company_type="UG")
+        with self.assertRaises(ValueError):
+            self.service.resume_job(first)
+        self.assertEqual(self.service.load_job(first)["status"], "pending")
+        for operation in (self.service.run_job, self.service.resume_job):
+            with self.assertRaises(KeyError):
+                operation("missing")
+        one, two = self.service.run_job(first), self.service.run_job(second)
+        self.assertNotEqual(one["candidates"][0]["id"], two["candidates"][0]["id"])
+        calls = self.evaluator.call_count
+        with self.assertRaises(KeyError):
+            self.service.evaluate_draft(second, one["drafts"][0]["id"])
+        with self.assertRaises(ValueError):
+            self.service.evaluate_draft(first, one["drafts"][0]["id"], evaluation_id=two["evaluations"][0]["id"])
+        self.assertEqual(self.evaluator.call_count, calls)
+        self.assertEqual(self.service.load_results(first), one)
+        self.assertEqual(self.service.load_results(second), two)
