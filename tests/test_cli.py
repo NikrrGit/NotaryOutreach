@@ -48,3 +48,18 @@ class CLITests(unittest.TestCase):
                 self.assertIn("Saved job: job-1", errors)
                 self.service.create_job.assert_called_once_with(**expected)
                 self.service.run_job.assert_called_once_with("job-1")
+
+    def test_invalid_inputs_fail_before_creating_storage_or_jobs(self):
+        cases = [
+            ["search", "--type", "notary", "--location", "Berlin"],
+            ["search", "--type", "vc", "--location", "Europe"],
+            ["search", "--type", "notary", "--location", " ", "--company-type", "UG"],
+            ["search", "--type", "notary", "--location", "Berlin", "--company-type", "UG", "--limit", "0"],
+            ["search", "--type", "notary", "--location", "Berlin", "--company-type", "UG", "--industry", "AI"],
+        ]
+        for arguments in cases:
+            with self.subTest(arguments=arguments), self.assertRaises(SystemExit) as caught:
+                self.run_cli(arguments)
+            self.assertEqual(caught.exception.code, 2)
+        self.storage.assert_not_called()
+        self.service.create_job.assert_not_called()
