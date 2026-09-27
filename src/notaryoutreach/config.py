@@ -36,3 +36,21 @@ def load_config(env_file: str | Path = ".env", *, require_api_key: bool = False)
         raise ConfigurationError("Application data and checkpoints need distinct file paths.")
     return Settings(groq_api_key=key, database_path=paths["DATABASE_PATH"],
                     checkpoint_path=paths["CHECKPOINT_PATH"])
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Validate local outreach configuration.")
+    parser.add_argument("--env-file", type=Path, default=Path(".env"))
+    parser.add_argument("--require-api-key", action="store_true", help="Also check that Groq credentials are configured.")
+    args = parser.parse_args()
+    try:
+        load_config(args.env_file, require_api_key=args.require_api_key)
+    except ConfigurationError as exc:
+        print(f"Configuration error: {exc}")
+        return 1
+    print("Configuration valid. No external connection was made.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
