@@ -391,3 +391,45 @@ class VCWorkflowTests(unittest.TestCase):
             self.discovery.discover.assert_called_once()
             self.verifier.verify.assert_called_once()
             self.writer.write_verified.assert_called_once()
+
+    def test_both_targets_resume_after_each_graph_stage(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from graph.checkpointing import checkpoint_config, open_checkpointer, resume_job
+
+        for target in ("notary", "vc"):
+            for stage in ("discover", "verify", "write_emails", "evaluate"):
+                with self.subTest(target=target, stage=stage), TemporaryDirectory() as directory:
+                    context = self.context if target == "vc" else dict(location="Berlin", company_type="UG")
+                    candidate = Candidate(name="Example", city="Berlin", target_type=target,
+                                          source_url="https://example.org")
+                    verification = VerificationResult(
+                        candidate=candidate, **context, status="supported", confidence=0.95,
+                        reasoning="Supported", evidence_quote="Relevant services", source_url="https://example.org",
+                    )
+                    self.discovery.discover.return_value = [candidate]
+                    self.verifier.verify.return_value = verification
+                    self.writer.write_verified.return_value = EmailDraft(subject="UG enquiry", body="Could we have a conversation?")
+                    self.provider.generate_structured.return_value = {
+                        **self.provider.generate_structured.return_value,
+                        "appointment_requested": True, "correct_company_type": True,
+                    }
+                    for method in (self.discovery.discover, self.verifier.verify,
+                                   self.writer.write_verified, self.provider.generate_structured):
+                        method.reset_mock()
+                    path = Path(directory) / "checkpoints.sqlite3"
+                    with open_checkpointer(path) as saver:
+                        graph = self.build(saver)
+                        partial = graph.invoke(create_initial_state(**context), checkpoint_config("job"),
+                                               interrupt_after=[stage], durability="sync")
+                        self.assertTrue(graph.get_state(checkpoint_config("job")).next)
+                    with open_checkpointer(path) as saver:
+                        resumed = resume_job(self.build(saver), thread_id="job")
+                    self.assertEqual(resumed["status"], "ready_for_review")
+                    for field in ("candidates", "verification_results", "email_drafts", "evaluations"):
+                        self.assertEqual(resumed[field][:len(partial[field])], partial[field])
+                    self.assertEqual(resumed["settings"].target_type, target)
+                    self.discovery.discover.assert_called_once()
+                    self.verifier.verify.assert_called_once()
+                    self.writer.write_verified.assert_called_once()
+                    self.provider.generate_structured.assert_called_once()
