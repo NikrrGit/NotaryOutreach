@@ -1,7 +1,7 @@
 [project]
 name = "notaryoutreach"
 version = "0.1.0"
-description = "Local notary outreach workflow with Supabase storage and human email review"
+description = "Local Notary and VC outreach with SQLite storage and human email review"
 readme = "README.md"
 authors = [
     { email = "nikhilrr2311@gmail.com" }
@@ -10,7 +10,6 @@ requires-python = ">=3.13"
 dependencies = [
     "groq",
     "pypdf",
-    "supabase>=2,<3",
     "python-dotenv>=1,<2",
     "pydantic>=2,<3",
     "langgraph>=1.2.11",
