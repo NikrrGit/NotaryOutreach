@@ -7,7 +7,7 @@ edits and new review decisions need new IDs. Only job status is mutable.
 
 Records use the SQL column names. metadata_json and issues_json accept Python
 dict/list values on write and are decoded on read. This module has no agent,
-Groq, Streamlit or Supabase dependencies.
+Groq or Streamlit dependencies.
 """
 
 from __future__ import annotations

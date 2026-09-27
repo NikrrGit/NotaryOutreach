@@ -64,54 +64,6 @@ def _verifications(state: WorkflowState) -> dict[str, VerificationResult]:
     }
 
 
-class SupabaseDraftStore:
-    """Save drafts through an already authenticated Supabase client.
-
-    Uses the existing notaries schema. Draft IDs must be unique primary keys.
-    Replaying a saved draft preserves its human review status. The schema stores
-    subject and body together; full evaluations/evidence remain in graph state
-    and require durable graph checkpoints to survive process restarts.
-    """
-
-    def __init__(self, client: Any) -> None:
-        self.client = client
-
-    def __call__(
-        self,
-        record: CandidateEmailDraft,
-        verification: VerificationResult,
-        evaluation: EvaluationResult,
-    ) -> None:
-        if evaluation.draft_id != record.draft_id or not evaluation.passed:
-            raise ValueError("A passing evaluation for this draft is required.")
-        if verification.candidate != record.candidate:
-            raise ValueError("Verification belongs to a different candidate.")
-        EmailWriterInput.from_verification(verification)
-        table = self.client.table("notaries")
-        if table.select("id").eq("id", record.draft_id).execute().data:
-            return
-        candidate = record.candidate
-        payload = {
-            "id": record.draft_id,
-            "name": candidate.name,
-            "city": candidate.city,
-            "website": candidate.website,
-            "email": candidate.email,
-            "phone": candidate.phone,
-            "source_url": verification.source_url,
-            "personalised_email": f"Betreff: {record.draft.subject}\n\n{record.draft.body}",
-            "status": "pending",
-        }
-        try:
-            self.client.table("notaries").insert(payload).execute()
-        except Exception:
-            # A concurrent replay or a lost response may have already saved it.
-            if not self.client.table("notaries").select("id").eq(
-                "id", record.draft_id,
-            ).execute().data:
-                raise
-
-
 class WorkflowNodes:
     """Bind agents and storage once, then register discover/verify/write_email/
     evaluate/persist as graph nodes. Storage must tolerate replay of a draft ID.
