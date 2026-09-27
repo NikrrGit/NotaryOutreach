@@ -90,3 +90,17 @@ class CLITests(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):
             self.run_cli(["jobs"])
             self.storage.assert_called_with("file.db")
+
+    def test_execution_errors_preserve_job_id_without_exposing_provider_details(self):
+        self.service.run_job.side_effect = RuntimeError("private API key")
+        code, output, errors = self.run_cli(["search", "--type", "notary", "--location", "Berlin", "--company-type", "UG"])
+        self.assertEqual(code, 1)
+        self.assertEqual(output, "")
+        self.assertIn("job-1", errors)
+        self.assertIn("resume", errors)
+        self.assertNotIn("private API key", errors)
+        self.service.load_results.side_effect = KeyError("missing")
+        code, output, errors = self.run_cli(["show", "missing"])
+        self.assertEqual(code, 1)
+        self.assertEqual(output, "")
+        self.assertIn("not found", errors)
