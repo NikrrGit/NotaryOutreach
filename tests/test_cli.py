@@ -28,3 +28,23 @@ class CLITests(unittest.TestCase):
         with redirect_stdout(output), redirect_stderr(errors):
             code = main(arguments)
         return code, output.getvalue(), errors.getvalue()
+
+    def test_search_passes_both_target_settings_to_service(self):
+        cases = [
+            (["--type", "notary", "--location", " Berlin ", "--company-type", "UG"],
+             dict(target_type="notary", location="Berlin", company_type="UG", startup_description=None,
+                  industry=None, funding_stage=None, target_count=10)),
+            (["--type", "vc", "--location", "Europe", "--description", "Security software",
+              "--industry", "Cybersecurity", "--stage", "Seed", "--limit", "20"],
+             dict(target_type="vc", location="Europe", company_type=None, startup_description="Security software",
+                  industry="Cybersecurity", funding_stage="Seed", target_count=20)),
+        ]
+        for arguments, expected in cases:
+            with self.subTest(target=expected["target_type"]):
+                self.service.reset_mock()
+                code, output, errors = self.run_cli(["search", *arguments])
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(output)["job"]["id"], "job-1")
+                self.assertIn("Saved job: job-1", errors)
+                self.service.create_job.assert_called_once_with(**expected)
+                self.service.run_job.assert_called_once_with("job-1")
