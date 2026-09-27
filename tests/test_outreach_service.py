@@ -311,3 +311,62 @@ class WorkflowServiceTests(unittest.TestCase):
         self.assertEqual(self.evaluator.call_count, calls)
         self.assertEqual(self.service.load_results(first), one)
         self.assertEqual(self.service.load_results(second), two)
+
+    def test_real_agents_complete_both_workflows_through_review(self):
+        import json
+        from unittest.mock import Mock
+        from agents.discovery import DiscoveryAgent
+        from agents.verification import VerificationAgent
+        from agents.email_writer import EmailDraft, EmailWriter
+        from agents.evaluator import EmailEvaluator
+
+        for target in ("notary", "vc"):
+            with self.subTest(target=target):
+                search, assessment, writer, evaluator = Mock(), Mock(), Mock(), Mock()
+                quote = "Wir begleiten UG-Gründungen." if target == "notary" else "We invest in European cybersecurity startups at seed stage."
+                search.search.return_value = json.dumps({"candidates": [{
+                    "name": "Example", "city": "Berlin", "website": "https://example.org",
+                    "source_url": "https://example.org", "email": "office@example.org",
+                }]})
+                assessment.return_value = json.dumps(dict(status="supported", confidence=0.95,
+                                                          reasoning="Evidence matches", evidence_quote=quote,
+                                                          source_url="https://example.org"))
+                writer.generate_structured.return_value = EmailDraft(
+                    subject="Anfrage", body="Wann wäre ein Termin zur UG-Gründung möglich?" if target == "notary"
+                    else "Wir entwickeln Sicherheitssoftware. Hätten Sie Zeit für ein kurzes Gespräch?",
+                )
+                evaluator.generate_structured.return_value = dict(
+                    passed=True, claims_supported=True, score=0.95, reasoning="Grounded draft", issues=[],
+                    **(dict(appointment_requested=True, correct_company_type=True) if target == "notary" else
+                       dict(conversation_requested=True, startup_represented_correctly=True, investment_fit_supported=True)),
+                )
+                service = OutreachService(
+                    self.storage, checkpoint_path=self.checkpoint_path,
+                    discovery_agent=DiscoveryAgent(provider=search),
+                    verification_agent=VerificationAgent(provider=assessment, page_reader=Mock(return_value=quote)),
+                    email_writer=EmailWriter(writer), evaluator=EmailEvaluator(evaluator),
+                )
+                settings = dict(company_type="UG") if target == "notary" else dict(
+                    startup_description="Security software", industry="Cybersecurity", funding_stage="Seed",
+                )
+                job_id = service.create_job(target_type=target, location="Berlin", target_count=1, **settings)
+                results = service.run_job(job_id)
+                self.assertEqual(results["job"]["status"], "ready_for_review")
+                self.assertEqual(results["workflow_errors"], [])
+                self.assertEqual(results["verifications"][0]["evidence"], quote)
+                self.assertEqual(results["evaluations"][0]["score"], 0.95)
+                original = results["drafts"][0]
+                service.approve_draft(job_id, original["id"])
+                edited = service.edit_email(job_id, original["id"], subject="Neue Anfrage", body=original["body"])
+                with self.assertRaises(ValueError):
+                    service.approve_draft(job_id, edited)
+                service.evaluate_draft(job_id, edited)
+                service.approve_draft(job_id, edited)
+                expected = service.load_results(job_id)
+                offline = OutreachService(SQLiteStorage(self.path), checkpoint_path=self.checkpoint_path)
+                self.assertEqual(offline.resume_job(job_id), expected)
+                self.assertEqual([item["draft_id"] for item in expected["reviews"]], [original["id"], edited])
+                search.search.assert_called_once()
+                assessment.assert_called_once()
+                writer.generate_structured.assert_called_once()
+                self.assertEqual(evaluator.generate_structured.call_count, 2)
