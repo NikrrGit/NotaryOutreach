@@ -33,3 +33,14 @@ class ConfigurationTests(unittest.TestCase):
             with patch.dict("os.environ", {"GROQ_API_KEY": " "}, clear=True):
                 with self.assertRaises(ConfigurationError):
                     load_config(path, require_api_key=True)
+
+    def test_invalid_database_paths_are_rejected(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "missing.env"
+            for values in (
+                {"DATABASE_PATH": ":memory:"}, {"CHECKPOINT_PATH": "file:test?mode=memory"},
+                {"DATABASE_PATH": " "}, {"DATABASE_PATH": "same.db", "CHECKPOINT_PATH": "same.db"},
+            ):
+                with self.subTest(values=values), patch.dict("os.environ", values, clear=True):
+                    with self.assertRaises(ConfigurationError):
+                        load_config(path)
