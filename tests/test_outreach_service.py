@@ -402,3 +402,46 @@ class WorkflowServiceTests(unittest.TestCase):
                     offline = OutreachService(SQLiteStorage(self.path), checkpoint_path=self.checkpoint_path)
                     self.assertEqual(offline.resume_job(job_id), results)
                     self.assertEqual({name: method.call_count for name, method in stages.items()}, calls)
+
+    def test_reopening_recovers_writes_at_every_stage_for_both_targets(self):
+        from unittest.mock import patch
+
+        original_save = self.storage.save_record
+        for target in ("notary", "vc"):
+            for failed_table in ("candidates", "verifications", "drafts", "evaluations"):
+                with self.subTest(target=target, failed_table=failed_table):
+                    for method in (self.discovery.discover, self.verifier.verify,
+                                   self.writer.write_verified, self.evaluator):
+                        method.reset_mock()
+                    settings = dict(company_type="UG") if target == "notary" else dict(
+                        startup_description="Security software", industry="Cybersecurity", funding_stage="Seed",
+                    )
+                    job_id = self.service.create_job(target_type=target, location="Berlin", **settings)
+
+                    def fail_selected_write(table, record):
+                        if table == failed_table:
+                            raise OSError("Interrupted write")
+                        return original_save(table, record)
+
+                    with patch.object(self.storage, "save_record", side_effect=fail_selected_write):
+                        with self.assertRaises(OSError):
+                            self.service.run_job(job_id)
+                    partial = self.service.load_results(job_id)
+                    self.assertEqual(partial["job"]["status"], "failed")
+                    self.assertTrue(partial["has_checkpoint"])
+                    reopened = OutreachService(
+                        SQLiteStorage(self.path), checkpoint_path=self.checkpoint_path,
+                        discovery_agent=self.discovery, verification_agent=self.verifier,
+                        email_writer=self.writer, evaluator=self.evaluator,
+                    )
+                    recovered = reopened.resume_job(job_id)
+                    self.assertEqual(recovered["job"]["status"], "ready_for_review")
+                    for table in ("candidates", "verifications", "drafts", "evaluations"):
+                        self.assertEqual(len(recovered[table]), 1)
+                        for record in partial[table]:
+                            self.assertIn(record, recovered[table])
+                    self.discovery.discover.assert_called_once()
+                    self.verifier.verify.assert_called_once()
+                    self.writer.write_verified.assert_called_once()
+                    self.evaluator.assert_called_once()
+                    self.assertEqual(reopened.resume_job(job_id), recovered)
