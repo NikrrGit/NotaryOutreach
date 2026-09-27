@@ -19,3 +19,17 @@ class ConfigurationTests(unittest.TestCase):
             with self.assertRaises(ConfigurationError):
                 load_config(path, require_api_key=True)
             self.assertFalse(path.exists())
+
+    def test_environment_overrides_file_and_key_is_hidden(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / ".env"
+            path.write_text("GROQ_API_KEY=file-key\nDATABASE_PATH=file.db\nCHECKPOINT_PATH=file-checkpoints.db\n")
+            with patch.dict("os.environ", {"GROQ_API_KEY": " env-key ", "DATABASE_PATH": "env.db"}, clear=True):
+                settings = load_config(path, require_api_key=True)
+                self.assertEqual(settings.groq_api_key, "env-key")
+                self.assertEqual(settings.database_path, Path("env.db"))
+                self.assertEqual(settings.checkpoint_path, Path("file-checkpoints.db"))
+                self.assertNotIn("env-key", repr(settings))
+            with patch.dict("os.environ", {"GROQ_API_KEY": " "}, clear=True):
+                with self.assertRaises(ConfigurationError):
+                    load_config(path, require_api_key=True)
