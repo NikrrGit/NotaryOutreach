@@ -370,3 +370,35 @@ class WorkflowServiceTests(unittest.TestCase):
                 assessment.assert_called_once()
                 writer.generate_structured.assert_called_once()
                 self.assertEqual(evaluator.generate_structured.call_count, 2)
+
+    def test_each_agent_failure_stops_safely_for_both_targets(self):
+        stages = {"discovery": self.discovery.discover, "verification": self.verifier.verify,
+                  "writer": self.writer.write_verified, "evaluator": self.evaluator}
+        defaults = {name: method.side_effect for name, method in stages.items()}
+        for target in ("notary", "vc"):
+            for stage, failing in stages.items():
+                with self.subTest(target=target, stage=stage):
+                    for name, method in stages.items():
+                        method.reset_mock()
+                        method.side_effect = defaults[name]
+                    failing.side_effect = TimeoutError("Private provider response")
+                    settings = dict(company_type="UG") if target == "notary" else dict(
+                        startup_description="Security software", industry="Cybersecurity", funding_stage="Seed",
+                    )
+                    job_id = self.service.create_job(target_type=target, location="Berlin", **settings)
+                    results = self.service.run_job(job_id)
+                    self.assertEqual(results["job"]["status"], "manual_review")
+                    self.assertTrue(results["workflow_errors"])
+                    self.assertNotIn("Private provider response", str(results))
+                    self.assertEqual(results["reviews"], [])
+                    self.assertFalse(any(item["passed"] for item in results["evaluations"]))
+                    self.assertEqual(failing.call_count, 1 if stage == "discovery" else 3)
+                    if stage in ("discovery", "verification"):
+                        self.writer.write_verified.assert_not_called()
+                    for draft in results["drafts"]:
+                        with self.assertRaises(ValueError):
+                            self.service.approve_draft(job_id, draft["id"])
+                    calls = {name: method.call_count for name, method in stages.items()}
+                    offline = OutreachService(SQLiteStorage(self.path), checkpoint_path=self.checkpoint_path)
+                    self.assertEqual(offline.resume_job(job_id), results)
+                    self.assertEqual({name: method.call_count for name, method in stages.items()}, calls)
