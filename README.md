@@ -2,7 +2,7 @@
 
 Find notaries for company formation or venture capital investors for your startup, then prepare evidence-based outreach drafts for human review.
 
-Outreach reduces the manual work of finding candidates, checking their websites, and writing a relevant first email. It collects sources, checks suitability, and generates personalized German email drafts in one local app. **It never sends emails.**
+Outreach reduces the manual work of finding candidates, checking their websites, and writing a relevant first email. It collects sources, checks suitability, and generates personalized German email drafts in one local app. Emails are sent only when you review the recipient and message and click **Send email**.
 
 | Search | What you provide | What it checks |
 | --- | --- | --- |
@@ -44,7 +44,7 @@ Set `LLM_PROVIDER` and its matching API key in `.env`; no code changes are neede
 
 | `LLM_PROVIDER` | Key | Default generation model | Default live search model |
 | --- | --- | --- | --- |
-| `groq` (default) | `GROQ_API_KEY` | `openai/gpt-oss-20b` | `groq/compound` |
+| `groq` (default) | `GROQ_API_KEY` | `openai/gpt-oss-20b` | `openai/gpt-oss-120b` |
 | `openai` | `OPENAI_API_KEY` | `gpt-4.1-mini` | `gpt-4.1-mini` |
 | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` | `claude-sonnet-4-6` |
 
@@ -55,7 +55,7 @@ LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=your_anthropic_api_key
 ```
 
-Existing Groq-only `.env` files still work. Set `LLM_MODEL` to override generation and `SEARCH_MODEL` to override discovery. The search model must support its provider's native web-search tool, and your account must have access. There is no automatic fallback to another provider. Restart the app after changing settings.
+Groq discovery uses [browser search](https://console.groq.com/docs/tool-use/built-in-tools/browser-search). The retired `groq/compound` model is no longer the default; remove any old `SEARCH_MODEL=groq/compound` override. Existing Groq API keys still work with supported models. Set `LLM_MODEL` to override generation and `SEARCH_MODEL` to override discovery. The search model must support its provider's native web-search tool, and your account must have access. There is no automatic fallback to another provider. Restart the app after changing settings.
 
 OpenAI and Anthropic discovery use [OpenAI web search](https://developers.openai.com/api/docs/guides/tools-web-search) and [Anthropic web search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool), followed by a separate call to format the research as JSON. Web-search charges and token usage apply.
 
@@ -76,12 +76,29 @@ Replace the endpoint and model with your provider's values. Local servers can us
 
 ## Run your first search
 
-1. Choose **Notary** or **Venture Capital** and enter the search criteria.
-2. Select **Start search**, or **Save search** to run it later.
-3. Open a candidate and inspect the evidence, sources, draft, and evaluation.
-4. Edit and evaluate the draft, then approve or reject it. Approval requires a passing evaluation.
+1. Choose **Notary** or **Venture Capital** in the sidebar and start a search.
+2. Browse the contacts table and select **Open contact** to see details and sources.
+3. Edit the email beside the contact. A plain default template appears if no AI draft is available.
+4. Check the recipient, facts, and signature. Tick **I reviewed this recipient and message**, then click **Send email**.
 
-Edits create a new draft version that needs fresh evaluation and approval. Previous versions and review decisions are retained. Approval records your decision locally; copy the reviewed draft into your email client when you are ready to contact someone.
+Failed searches show the error directly and offer **Retry search**, which creates a fresh job. Previous searches remain available. Editing saves a new draft version; saved reviews stay attached to their original version. AI evaluation and approval are available under **Quality checks and review history**. Sending is a separate, explicit human decision and does not require an AI passing score.
+
+## Send from the app
+
+Add your mail provider's SMTP settings to `.env`. Search and editing work without them; direct sending requires them.
+
+```dotenv
+SMTP_HOST=smtp.your-provider.example
+SMTP_PORT=587
+SMTP_SECURITY=starttls
+SMTP_FROM=you@example.com
+SMTP_USERNAME=you@example.com
+SMTP_PASSWORD=your_app_password
+```
+
+Use the host and credentials supplied by your email provider. For implicit TLS, use `SMTP_SECURITY=ssl` and `SMTP_PORT=465`. Keep credentials in `.env`; some providers require an app password. Username and password may both be blank for servers that allow authenticated network relaying. Plain unencrypted SMTP is not supported.
+
+The app sends one message per click, saves the exact draft and recipient, and records the result in SQLite. A successful send means the SMTP server accepted the message, not guaranteed inbox delivery. Refreshing cannot resend the same draft. If a connection fails during submission, the app marks delivery as uncertain and blocks resending that version; check your mail provider before creating another copy. No bulk sends or automatic follow-ups run.
 
 ## How it works
 
@@ -89,7 +106,7 @@ Both search modes use the same service and four agents. The selected target chan
 
 ```mermaid
 flowchart TD
-    UI["Streamlit: search and human review"] --> Service["OutreachService"]
+    UI["Streamlit: contacts, email editor, send"] --> Service["OutreachService"]
     CLI["CLI"] --> Service
     Service --> Workflow
     subgraph Workflow["Shared LangGraph workflow"]
@@ -98,11 +115,12 @@ flowchart TD
         Write --> Evaluate["Evaluate draft"]
     end
     Evaluate -->|Results| Service
-    Service <--> Data[("SQLite: results and reviews")]
+    Service <--> Data[("SQLite: results, reviews, deliveries")]
+    Service -->|Explicit Send email click| SMTP["Your SMTP mail server"]
     Workflow --- Checkpoints[("SQLite: workflow checkpoints")]
 ```
 
-The service saves jobs, candidates, verifications, drafts, evaluations, and reviews. Checkpoints track workflow progress for recovery. Verification uses website evidence; missing or inconclusive evidence stays unknown.
+The service saves jobs, candidates, verifications, drafts, evaluations, reviews, and delivery records. Existing databases upgrade automatically while preserving saved reviews. Checkpoints track workflow progress for recovery. Verification uses website evidence; missing or inconclusive evidence stays unknown.
 
 ## Command line
 
@@ -155,7 +173,7 @@ Results are stored locally, but agent calls send search details, startup descrip
 
 - **Interrupted search:** Select **Resume search** in Streamlit when available, or use `outreach resume JOB_ID`. If no checkpoint exists, use **Start saved search** or `outreach run JOB_ID`.
 - **Missing key:** Set the API key matching `LLM_PROVIDER` (and `SEARCH_PROVIDER` if different) in `.env` and restart the app. The configuration check below validates settings; it does not test the key against the provider.
-- **No draft or manual review required:** Inspect the recorded errors and evidence. A completed `manual_review` job does not restart through resume; correct the input or external issue and create a new search if needed.
+- **No draft or manual review required:** Inspect the visible errors and evidence. Correct the issue and click **Retry search**. Contacts without AI drafts still offer a default email template.
 - **One local user:** Run one application process against the database files. Avoid running CLI workflows alongside Streamlit on the same files. Authentication, background workers, and multi-user hosting are outside this MVP.
 
 Recovery may repeat an interrupted external call; stable record IDs prevent duplicate persisted results. The requested result count is a discovery target, not a guarantee of eligible candidates or drafts. Contacts and model assessments need human review, confidence scores are not calibrated probabilities, and Notary searches do not enforce an exact distance radius.
@@ -171,7 +189,7 @@ Configuration validation makes no external connection. Tests use temporary datab
 
 Provider changes apply to new calls, including resumed jobs and re-evaluation; existing saved results remain unchanged.
 
-The main code lives in `src/providers/`, `src/agents/`, `src/graph/`, `src/services/`, `src/storage/`, and `src/ui/`. The initial schema is packaged in `src/db/migrations/001_initial.sql`.
+The main code lives in `src/providers/`, `src/agents/`, `src/graph/`, `src/services/`, `src/storage/`, and `src/ui/`. SQLite migrations are packaged in `src/db/migrations/`.
 
 ## License
 

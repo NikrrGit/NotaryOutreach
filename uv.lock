@@ -739,7 +739,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2,<3" },
     { name = "pypdf" },
     { name = "python-dotenv", specifier = ">=1,<2" },
-    { name = "streamlit", specifier = ">=1.40,<2" },
+    { name = "streamlit", specifier = ">=1.64,<2" },
 ]
 
 [[package]]

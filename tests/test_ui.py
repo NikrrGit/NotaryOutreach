@@ -119,3 +119,58 @@ class UITests(unittest.TestCase):
         self.assertTrue(app.error)
         self.assertNotIn("private provider response", app.error[0].value)
         self.assertEqual(len(self.service.load_results(job["id"])["evaluations"]), 2)
+
+    def test_failed_search_shows_error_template_and_retry_creates_results(self):
+        app = self.app
+        working = self.discovery.discover.side_effect
+        failure = RuntimeError("private provider response")
+        failure.status_code = 404
+        self.discovery.discover.side_effect = failure
+        next(widget for widget in app.text_input if widget.label == "Location").set_value("Stuttgart")
+        next(button for button in app.button if button.label == "Start search").click().run()
+        failed = self.service.list_jobs()[0]
+        self.assertFalse(app.exception)
+        self.assertTrue(any("model is unavailable" in item.value for item in app.error))
+        self.assertFalse(any("private provider" in item.value for item in app.error))
+        self.assertTrue(any("UG" in item.value for item in app.text_area))
+        self.discovery.discover.side_effect = working
+        app.button(key=f"retry-{failed['id']}").click().run()
+        self.assertFalse(app.exception)
+        self.assertEqual(len(app.dataframe[0].value), 1)
+        self.assertEqual(len(self.service.list_jobs()), 2)
+        self.assertNotEqual(app.session_state["selected_job"], failed["id"])
+
+    def test_default_draft_can_be_edited_and_sent_without_ai_generation(self):
+        job = self.service.create_job(target_type="vc", location="Berlin", startup_description="Security software",
+                                      industry="Cybersecurity", funding_stage="Seed")
+        candidate = self.storage.save_record("candidates", dict(job_id=job, target_type="vc", name="Example Capital",
+                            city="Berlin", email="team@example.org", website="https://example.org", source_url="https://example.org"))
+        app = self.app
+        app.session_state["selected_job"] = job
+        settings = dict(SMTP_HOST="smtp.example.org", SMTP_FROM="sender@example.org", SMTP_USERNAME="user", SMTP_PASSWORD="test")
+        with patch.dict("os.environ", settings), patch("services.email_delivery.smtplib.SMTP") as factory:
+            client = factory.return_value
+            client.send_message.return_value = {}
+            app.run()
+            self.assertFalse(app.exception)
+            self.assertEqual(app.dataframe[0].value.iloc[0]["name"], "Example Capital")
+            template = f"template-{candidate}"
+            original = app.text_area(key=f"body-{template}").value
+            self.assertIn("Security software", original)
+            self.assertTrue(app.button(key=f"send-{template}").disabled)
+            edited = original.replace("[Ihr Name]", "Test Sender")
+            app.text_area(key=f"body-{template}").set_value(edited).run()
+            next(item for item in app.checkbox if item.label == "I reviewed this recipient and message").check().run()
+            self.assertFalse(app.button(key=f"send-{template}").disabled)
+            app.button(key=f"send-{template}").click().run()
+            self.assertFalse(app.exception)
+            records = self.service.load_results(job)
+            self.assertEqual(records["drafts"][0]["body"], edited)
+            self.assertEqual(records["deliveries"][0]["status"], "sent")
+            self.assertEqual(client.send_message.call_args.args[0]["To"], "team@example.org")
+            saved = records["drafts"][0]["id"]
+            self.assertTrue(app.button(key=f"send-{saved}").disabled)
+            app.run()
+            client.send_message.assert_called_once()
+            self.discovery.discover.assert_not_called()
+            self.evaluator.assert_not_called()

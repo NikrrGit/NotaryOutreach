@@ -16,7 +16,7 @@ dependencies = [
     "pydantic>=2,<3",
     "langgraph>=1.2.11",
     "langgraph-checkpoint-sqlite>=3,<5",
-    "streamlit>=1.40,<2",
+    "streamlit>=1.64,<2",
 ]
 
 [project.scripts]

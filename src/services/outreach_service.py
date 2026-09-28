@@ -6,7 +6,7 @@ from typing import Any, Literal
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from threading import Lock
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from dotenv import dotenv_values
 import os
@@ -27,7 +27,7 @@ _EXECUTION_LOCK = Lock()
 
 
 class OutreachService:
-    """Run local searches and manage draft review without sending emails."""
+    """Run searches, review drafts, and send explicitly confirmed emails."""
 
     def __init__(
         self, storage: SQLiteStorage | None = None, *,
@@ -89,7 +89,7 @@ class OutreachService:
     def load_results(self, job_id: str) -> dict[str, Any]:
         """Load a job and its evidence, draft, evaluation and review history."""
         results = {"job": self.load_job(job_id)}
-        for table in ("candidates", "verifications", "drafts", "evaluations", "reviews"):
+        for table in ("candidates", "verifications", "drafts", "evaluations", "reviews", "deliveries"):
             results[table] = self.storage.list_records(table, job_id=job_id)
         results["has_checkpoint"] = False
         results["workflow_errors"] = []
@@ -104,6 +104,47 @@ class OutreachService:
                 results["workflow_errors"] = [item.model_dump() for item in state.get("errors", [])]
                 results["verification_history"] = [item.model_dump() for item in state.get("verification_results", [])]
         return results
+
+    def create_draft(self, job_id: str, candidate_id: str, *, subject: str, body: str) -> str:
+        """Save an editable starting draft for a discovered contact."""
+        candidate = self.storage.get_record("candidates", candidate_id)
+        if candidate is None or candidate["job_id"] != job_id:
+            raise KeyError(candidate_id)
+        if not subject.strip() or not body.strip() or "\n" in subject or "\r" in subject:
+            raise ValueError("Enter a one-line subject and a nonempty email body.")
+        return self.storage.save_record("drafts", {"candidate_id": candidate_id, "subject": subject.strip(), "body": body.strip()})
+
+    def send_draft(self, job_id: str, draft_id: str, *, recipient: str, confirmed: bool = False) -> dict:
+        """Send a human-confirmed saved draft once, independent of model approval."""
+        from email.utils import make_msgid
+        from services.email_delivery import DeliveryError, deliver, email_address, load_mail_settings
+
+        if confirmed is not True:
+            raise ValueError("Review the recipient and message before sending.")
+        recipient = email_address(recipient)
+        settings = load_mail_settings(self.env_file)
+        results = self.load_results(job_id)
+        draft = next((item for item in results["drafts"] if item["id"] == draft_id), None)
+        if draft is None:
+            raise KeyError(draft_id)
+        if "[Ihr Name]" in draft["body"]:
+            raise ValueError("Replace [Ihr Name] with your name before sending.")
+        if "\r" in draft["subject"] or "\n" in draft["subject"]:
+            raise ValueError("Email subjects must be a single line.")
+        record = dict(id=str(uuid4()), draft_id=draft_id, recipient=recipient, sender=settings.sender,
+                      message_id=make_msgid(domain=settings.sender.split("@", 1)[1]))
+        if not self.storage.claim_delivery(record):
+            raise ValueError("This draft was already submitted or its delivery is uncertain. Check delivery history.")
+        try:
+            deliver(settings, recipient=recipient, subject=draft["subject"], body=draft["body"], message_id=record["message_id"])
+        except DeliveryError as exc:
+            self.storage.finish_delivery(record["id"], "unknown" if exc.uncertain else "failed", str(exc))
+            raise
+        except Exception:
+            self.storage.finish_delivery(record["id"], "unknown", "Delivery status could not be confirmed.")
+            raise
+        self.storage.finish_delivery(record["id"], "sent")
+        return self.storage.get_record("deliveries", record["id"])
 
     def edit_email(
         self, job_id: str, draft_id: str, *, subject: str, body: str,

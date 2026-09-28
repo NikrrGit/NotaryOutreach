@@ -1,6 +1,6 @@
 """Local persistence shared by Notary and VC outreach.
 
-Use save_record(table, record) for all six record types. Supply stable IDs when
+Use save_record(table, record) for core records. Supply stable IDs when
 replaying workflow output: an identical replay is a no-op, a changed payload
 with the same ID is an error. Drafts, evaluations and reviews are append-only;
 edits and new review decisions need new IDs. Only job status is mutable.
@@ -30,6 +30,7 @@ _FIELDS = {
     "drafts": {"id", "candidate_id", "subject", "body"},
     "evaluations": {"id", "draft_id", "passed", "score", "reasoning", "issues_json"},
     "reviews": {"id", "draft_id", "decision", "final_subject", "final_body"},
+    "deliveries": {"id", "draft_id", "recipient", "sender", "message_id", "status", "error"},
 }
 _JSON_FIELDS = {"metadata_json": dict, "issues_json": list}
 
@@ -52,7 +53,10 @@ class SQLiteStorage:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
             if version == 0:
                 connection.executescript(migration.read_text(encoding="utf-8"))
-            elif version != 1:
+                version = 1
+            if version == 1:
+                connection.executescript(migration.with_name("002_deliveries.sql").read_text(encoding="utf-8"))
+            elif version != 2:
                 raise ValueError(f"Unsupported database schema version: {version}")
 
     def _connect(self) -> sqlite3.Connection:
@@ -183,3 +187,28 @@ class SQLiteStorage:
         query += " ORDER BY record.rowid"
         with closing(self._connect()) as connection:
             return [self._decode(row) for row in connection.execute(query, parameters)]
+
+    def claim_delivery(self, record: dict) -> bool:
+        """Claim one draft atomically; only definite pre-send failures can retry."""
+        with closing(self._connect()) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute("SELECT status FROM deliveries WHERE draft_id = ?", (record["draft_id"],)).fetchone()
+            if existing and existing["status"] != "failed":
+                return False
+            if existing:
+                connection.execute("DELETE FROM deliveries WHERE draft_id = ? AND status = 'failed'", (record["draft_id"],))
+            connection.execute(
+                "INSERT INTO deliveries (id, draft_id, recipient, sender, message_id, status) VALUES (?, ?, ?, ?, ?, 'sending')",
+                tuple(record[field] for field in ("id", "draft_id", "recipient", "sender", "message_id")),
+            )
+        return True
+
+    def finish_delivery(self, delivery_id: str, status: str, error: str | None = None) -> None:
+        """Record acceptance or uncertainty without permitting automatic resend."""
+        if status not in {"sent", "failed", "unknown"}:
+            raise ValueError("Invalid delivery result.")
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                "UPDATE deliveries SET status = ?, error = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+                (status, error, delivery_id),
+            )
