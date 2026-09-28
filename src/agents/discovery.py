@@ -121,7 +121,7 @@ class DiscoveryAgent:
     def __init__(
         self,
         client=None,
-        model: str = "groq/compound",
+        model: str = "openai/gpt-oss-120b",
         batch_size: int = 10,
         max_attempts: int = 10,
         *,

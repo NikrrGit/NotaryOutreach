@@ -13,7 +13,7 @@ from groq import APIError, Groq
 from .config import ConfigurationError
 from .models import Candidate, ValidationError
 
-MODEL = "groq/compound-mini"
+MODEL = "openai/gpt-oss-120b"
 FIELDS = ("name", "city", "source_url", "website", "email", "phone")
 
 SYSTEM_PROMPT = (
@@ -51,8 +51,8 @@ def discover_notaries(client: Groq, city: str, limit: int = 10) -> list[Candidat
         ],
         temperature=0,
         max_completion_tokens=3500,
-        extra_headers={"Groq-Model-Version": "2025-07-23"},
-        compound_custom={"tools": {"enabled_tools": ["web_search"]}},
+        tools=[{"type": "browser_search"}], tool_choice="required",
+        reasoning_effort="low",
     )
     if not response.choices or not response.choices[0].message.content:
         raise ValidationError("Model returned no content.")

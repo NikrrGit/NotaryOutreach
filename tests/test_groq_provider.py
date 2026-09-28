@@ -31,7 +31,7 @@ class GroqProviderTests(unittest.TestCase):
         self.create = self.groq.return_value.chat.completions.create
 
     def test_constructor_stores_models_and_key(self):
-        self.assertEqual(self.provider.compound_model, "groq/compound")
+        self.assertEqual(self.provider.compound_model, "openai/gpt-oss-120b")
         self.assertEqual(self.provider.reasoning_model, "openai/gpt-oss-20b")
         self.assertEqual(self.groq.call_args.kwargs["api_key"], "test-key")
         custom = GroqProvider("other-key", "search-model", "reasoning-model")

@@ -107,20 +107,22 @@ class ProviderTests(unittest.TestCase):
             finish_reason=finish_reason, message=SimpleNamespace(content=content),
         )])
 
-    def test_request_uses_documented_tools_and_header(self):
+    def test_request_separates_browser_search_from_json_formatting(self):
         client = Mock()
         client.chat.completions.create.return_value = self.response()
         provider = GroqSearchProvider(client=client)
         self.assertEqual(provider.search(system_prompt="system", prompt="query"), '{"candidates": []}')
-        request = client.chat.completions.create.call_args.kwargs
-        self.assertEqual(request["extra_headers"], {"Groq-Model-Version": "latest"})
-        self.assertEqual(request["compound_custom"]["tools"]["enabled_tools"], ["web_search", "visit_website"])
+        request = client.chat.completions.create.call_args_list[0].kwargs
+        self.assertEqual(request["tools"], [{"type": "browser_search"}])
+        self.assertEqual(request["tool_choice"], "required")
+        self.assertNotIn("response_format", request)
+        self.assertNotIn("tools", client.chat.completions.create.call_args.kwargs)
 
     def test_missing_or_incomplete_completion(self):
         for response in (SimpleNamespace(choices=[]), self.response(None), self.response("", "length")):
             client = Mock()
             client.chat.completions.create.return_value = response
-            with self.assertRaises(ValueError):
+            with self.assertRaises(RuntimeError):
                 GroqSearchProvider(client=client).search(system_prompt="system", prompt="query")
 
     def test_default_client_loads_env_and_closes(self):

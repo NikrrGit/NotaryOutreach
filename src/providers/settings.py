@@ -39,7 +39,7 @@ def provider_settings(values: dict, *, search: bool = False, require_key: bool =
     model = (values.get("LLM_MODEL") or "").strip() if not search else ""
     model = model or DEFAULT_MODELS.get(name, "")
     search_model = (values.get("SEARCH_MODEL") or "").strip()
-    search_model = search_model or ("groq/compound" if name == "groq" else DEFAULT_MODELS.get(name, ""))
+    search_model = search_model or ("openai/gpt-oss-120b" if name == "groq" else DEFAULT_MODELS.get(name, ""))
     base_url = None
     if name == "openai_compatible":
         base_url = (values.get("LLM_BASE_URL") or "").strip()

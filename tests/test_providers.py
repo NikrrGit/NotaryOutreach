@@ -253,7 +253,8 @@ class ProviderTests(unittest.TestCase):
             self.assertTrue(all(client.is_closed() for client in clients))
             self.assertEqual(len(clients), 3 if name == "openai_compatible" else 2)
             if name == "groq":
-                self.assertIn("compound_custom", requests[0])
+                self.assertEqual(requests[0]["tools"], [{"type": "browser_search"}])
+                self.assertNotIn("response_format", requests[0])
             else:
                 self.assertIn("tools", requests[0])
                 self.assertTrue(all("tools" not in request for request in requests[1:]))

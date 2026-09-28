@@ -18,6 +18,8 @@ from agents.discovery import Candidate, DiscoveryAgent, DiscoveryError
 from agents.email_writer import EmailWriter, EmailWriterInput
 from agents.verification import VerificationAgent, VerificationResult
 
+from providers.errors import failure_message
+
 from .state import CandidateEmailDraft, EvaluationResult, SearchSettings, WorkflowError, WorkflowState
 
 EvaluateDraft = Callable[[CandidateEmailDraft, VerificationResult], EvaluationResult]
@@ -34,7 +36,7 @@ def _error(node: str, exc: Exception, candidate: Candidate | None = None) -> Wor
     # Exception messages may contain provider responses or credentials.
     return WorkflowError(
         node=node,
-        message=f"{node} failed ({type(exc).__name__}).",
+        message=failure_message(exc),
         candidate_id=candidate_key(candidate) if candidate is not None else None,
         retryable=isinstance(exc, (TimeoutError, ConnectionError)),
     )
