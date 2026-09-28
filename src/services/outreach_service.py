@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from threading import Lock
 from uuid import NAMESPACE_URL, uuid5
@@ -161,25 +161,31 @@ class OutreachService:
 
     @contextmanager
     def _agent_session(self, *, evaluation_only: bool = False):
-        """Create missing agents lazily and close owned Groq clients."""
-        discovery, verifier, writer, evaluator = self.agents
-        provider = None
-        try:
-            if evaluator is None or (not evaluation_only and writer is None):
-                from providers.groq import GroqProvider
+        """Share configured clients and close them even after failures."""
+        from providers.clients import create_provider
+        from providers.settings import provider_settings
 
-                values = {**dotenv_values(self.env_file), **os.environ}
-                provider = GroqProvider(api_key=values.get("GROQ_API_KEY"))
+        discovery, verifier, writer, evaluator = self.agents
+        with ExitStack() as stack:
+            values = {**dotenv_values(self.env_file), **os.environ}
+            provider = None
+            if evaluator is None or (not evaluation_only and (writer is None or verifier is None)):
+                provider = create_provider(provider_settings(values, require_key=True))
+                stack.callback(provider.close)
             if evaluator is None:
                 evaluator = EmailEvaluator(provider)
             if not evaluation_only:
-                discovery = discovery if discovery is not None else DiscoveryAgent(env_file=str(self.env_file))
-                verifier = verifier if verifier is not None else VerificationAgent(env_file=str(self.env_file))
+                if discovery is None:
+                    settings = provider_settings(values, search=True, require_key=True)
+                    if provider is not None and settings.name == provider.settings.name:
+                        search_provider = provider
+                    else:
+                        search_provider = create_provider(settings)
+                        stack.callback(search_provider.close)
+                    discovery = DiscoveryAgent(provider=search_provider)
+                verifier = verifier if verifier is not None else VerificationAgent(provider=provider.assess)
                 writer = writer if writer is not None else EmailWriter(provider)
             yield discovery, verifier, writer, evaluator
-        finally:
-            if provider is not None:
-                provider.client.close()
 
     def _persist_state(self, job_id: str, state: dict) -> None:
         """Project checkpoint history into replay-safe application records."""

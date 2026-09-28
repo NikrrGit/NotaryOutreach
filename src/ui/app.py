@@ -29,7 +29,7 @@ def execute_job(service: OutreachService, job_id: str, *, resume: bool = False) 
     except Exception:
         st.session_state["notice"] = (
             "Search could not finish. Your saved search is available below. "
-            "Check your Groq API key and connection, then use Start or Resume to retry. "
+            "Check your selected provider’s API key and connection, then use Start or Resume to retry. "
             "If another search is running, wait for it to finish."
         )
         st.session_state["notice_level"] = "error"

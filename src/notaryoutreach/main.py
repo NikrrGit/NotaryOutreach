@@ -81,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
         print("Job was not found in the selected local database.", file=sys.stderr)
         return 1
     except Exception:
-        print("Command failed. Check your Groq key, connection, and local storage. "
+        print("Command failed. Check your provider settings and API key, connection, and local storage. "
               "If another workflow is running, wait for it to finish.", file=sys.stderr)
         if job_id is not None:
             print(f"Job: {job_id}. Use show to inspect it; resume an existing checkpoint or run an unstarted job.", file=sys.stderr)

@@ -9,6 +9,8 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "groq",
+    "openai>=2,<3",
+    "anthropic>=0.75,<1",
     "pypdf",
     "python-dotenv>=1,<2",
     "pydantic>=2,<3",

@@ -11,7 +11,7 @@ Outreach reduces the manual work of finding candidates, checking their websites,
 
 ## Quick start
 
-You need Git, [uv](https://docs.astral.sh/uv/getting-started/installation/), and a [Groq API key](https://console.groq.com/keys). The project uses Python 3.13.
+You need Git, [uv](https://docs.astral.sh/uv/getting-started/installation/), and an API key from Groq, OpenAI, or Anthropic. The project uses Python 3.13.
 
 ```sh
 git clone https://github.com/NikrrGit/NotaryOutreach.git
@@ -23,10 +23,11 @@ cp .env.example .env
 
 On Windows PowerShell, use `Copy-Item .env.example .env` for the last command.
 
-Open `.env` and set your key:
+Open `.env`, choose a provider, and set its key. For example:
 
 ```dotenv
-GROQ_API_KEY=your_groq_api_key
+LLM_PROVIDER=openai
+OPENAI_API_KEY=your_openai_api_key
 ```
 
 Start the app from the project directory:
@@ -36,6 +37,42 @@ uv run streamlit run src/ui/app.py --server.address 127.0.0.1
 ```
 
 Open the local URL printed in the terminal (usually <http://localhost:8501>). Press `Ctrl+C` to stop. The app creates the database files automatically; no database server or manual migration command is needed.
+
+## Choose your provider
+
+Set `LLM_PROVIDER` and its matching API key in `.env`; no code changes are needed.
+
+| `LLM_PROVIDER` | Key | Default generation model | Default live search model |
+| --- | --- | --- | --- |
+| `groq` (default) | `GROQ_API_KEY` | `openai/gpt-oss-20b` | `groq/compound` |
+| `openai` | `OPENAI_API_KEY` | `gpt-4.1-mini` | `gpt-4.1-mini` |
+| `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` | `claude-sonnet-4-6` |
+
+For Anthropic, for example:
+
+```dotenv
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=your_anthropic_api_key
+```
+
+Existing Groq-only `.env` files still work. Set `LLM_MODEL` to override generation and `SEARCH_MODEL` to override discovery. The search model must support its provider's native web-search tool, and your account must have access. There is no automatic fallback to another provider. Restart the app after changing settings.
+
+OpenAI and Anthropic discovery use [OpenAI web search](https://developers.openai.com/api/docs/guides/tools-web-search) and [Anthropic web search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool), followed by a separate call to format the research as JSON. Web-search charges and token usage apply.
+
+### Other OpenAI-compatible endpoints
+
+Use a Chat Completions-compatible endpoint for verification, drafting, and evaluation. It must follow JSON instructions; the app validates responses locally. Set a native search provider separately because a generic chat endpoint does not supply live web research:
+
+```dotenv
+LLM_PROVIDER=openai_compatible
+LLM_BASE_URL=https://your-provider.example/v1
+LLM_API_KEY=your_endpoint_api_key
+LLM_MODEL=your_model_id
+SEARCH_PROVIDER=openai
+OPENAI_API_KEY=your_openai_api_key
+```
+
+Replace the endpoint and model with your provider's values. Local servers can use an HTTP URL and a nonempty placeholder key if they do not require authentication. This supports compatible APIs, not arbitrary SDKs. `SEARCH_PROVIDER` can be `groq`, `openai`, or `anthropic`; provide that provider's key too.
 
 ## Run your first search
 
@@ -99,20 +136,25 @@ Commands return JSON on stdout and diagnostics on stderr. `notaryoutreach` is an
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `GROQ_API_KEY` | None | Required for research, generation, and re-evaluation; saved results can be browsed without it |
+| `LLM_PROVIDER` | `groq` | Provider for verification, drafting, and evaluation |
+| Provider API key | None | Use the matching key above; saved results can be browsed without it |
+| `LLM_MODEL` | Provider default | Generation model override |
+| `SEARCH_PROVIDER` | Same as `LLM_PROVIDER` | Native provider for discovery |
+| `SEARCH_MODEL` | Search provider default | Live search model override |
+| `LLM_BASE_URL`, `LLM_API_KEY` | None | Custom endpoint URL and key; used only for `openai_compatible` |
 | `DATABASE_PATH` | `data/outreach.db` | Application results and review history |
 | `CHECKPOINT_PATH` | `runs/checkpoints.sqlite3` | Workflow progress and recovery |
 
 Environment variables override `.env`. CLI flags `--env-file`, `--database`, and `--checkpoint-path` select another configuration file or override database paths. Relative paths are resolved from the current working directory.
 
-Results are stored locally, but agent calls send search details, startup descriptions, and relevant content to Groq. Research also accesses external websites. Internet access and Groq usage limits apply. `.env` and local databases are excluded from Git; keep credentials private.
+Results are stored locally, but agent calls send search details, startup descriptions, and relevant content to your selected generation and search providers. Research also accesses external websites. Internet access and provider usage limits apply. `.env` and local databases are excluded from Git; keep credentials private.
 
 **Backups:** Stop the app before copying both databases and any SQLite sidecar files. Restore both together. Preserve the application database's original absolute path when restoring resumable jobs: checkpoint identities include that path.
 
 ## Recovery and limitations
 
 - **Interrupted search:** Select **Resume search** in Streamlit when available, or use `outreach resume JOB_ID`. If no checkpoint exists, use **Start saved search** or `outreach run JOB_ID`.
-- **Missing key:** Set `GROQ_API_KEY` in `.env` and restart the app. The configuration check below validates settings; it does not test the key against Groq.
+- **Missing key:** Set the API key matching `LLM_PROVIDER` (and `SEARCH_PROVIDER` if different) in `.env` and restart the app. The configuration check below validates settings; it does not test the key against the provider.
 - **No draft or manual review required:** Inspect the recorded errors and evidence. A completed `manual_review` job does not restart through resume; correct the input or external issue and create a new search if needed.
 - **One local user:** Run one application process against the database files. Avoid running CLI workflows alongside Streamlit on the same files. Authentication, background workers, and multi-user hosting are outside this MVP.
 
@@ -127,7 +169,9 @@ uv run python -m unittest discover -s tests
 
 Configuration validation makes no external connection. Tests use temporary databases and mocked providers to cover both workflows, failures, recovery, persistence, and review preservation; they do not verify live provider availability or research quality.
 
-The main code lives in `src/agents/`, `src/graph/`, `src/services/`, `src/storage/`, and `src/ui/`. The initial schema is packaged in `src/db/migrations/001_initial.sql`.
+Provider changes apply to new calls, including resumed jobs and re-evaluation; existing saved results remain unchanged.
+
+The main code lives in `src/providers/`, `src/agents/`, `src/graph/`, `src/services/`, `src/storage/`, and `src/ui/`. The initial schema is packaged in `src/db/migrations/001_initial.sql`.
 
 ## License
 
