@@ -175,7 +175,10 @@ class ProviderTests(unittest.TestCase):
                 with self.subTest(provider=name, target=target):
                     self._run_workflow(name, target)
 
-    def _run_workflow(self, name, target):
+    def test_groq_formatting_recovery_completes_a_real_agent_workflow(self):
+        self._run_workflow("groq", "notary", format_error=True)
+
+    def _run_workflow(self, name, target, *, format_error=False):
         quote = "Wir begleiten UG-Gründungen." if target == "notary" else "We invest in European cybersecurity startups at seed stage."
         candidate = {"name": "Example", "city": "Berlin", "website": "https://example.org",
                      "source_url": "https://example.org", "email": "office@example.org", "target_type": target}
@@ -192,6 +195,10 @@ class ProviderTests(unittest.TestCase):
         def respond(request):
             body = json.loads(request.content)
             requests.append(body)
+            if format_error and len(requests) == 2:
+                return httpx.Response(400, json={"error": {
+                    "code": "tool_use_failed", "message": "Tool choice is none, but model called a tool",
+                }})
             research = "tools" in body
             content = json.dumps({"candidates": [candidate]} if research else next(payloads))
             if request.url.path.endswith("/responses"):

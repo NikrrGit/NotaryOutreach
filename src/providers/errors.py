@@ -17,6 +17,11 @@ def failure_message(exc: Exception) -> str:
     if isinstance(current, (TimeoutError, ConnectionError)) or type(current).__name__ in {"APITimeoutError", "APIConnectionError"}:
         return "The provider could not be reached. Check your connection and retry."
     if status == 400:
+        body = getattr(current, "body", None)
+        error = body.get("error", body) if isinstance(body, dict) else {}
+        code = error.get("code") if isinstance(error, dict) else None
+        if code in {"tool_use_failed", "json_validate_failed"}:
+            return "The provider could not format its response. Retry the search or choose another generation model with LLM_MODEL."
         return "The provider rejected the request. Check that the selected model supports the configured search or JSON features."
     if isinstance(current, ValueError):
         return "The provider returned an invalid result. Retry the search or choose another model."

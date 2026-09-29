@@ -59,12 +59,9 @@ class GroqSearchProvider:
             tools=[{"type": "browser_search"}], tool_choice="required",
             reasoning_effort="low", max_completion_tokens=8192,
         )
-        from providers.groq import GroqProvider
+        from providers.groq import GroqProvider, format_research
         research = GroqProvider._response_content(response)
-        response = client.chat.completions.create(
-            model="openai/gpt-oss-20b",
-            messages=[{"role": "system", "content": system_prompt + "\nReturn JSON using only this research; preserve sources."},
-                      {"role": "user", "content": research}],
-            response_format={"type": "json_object"},
+        return format_research(
+            client, model="openai/gpt-oss-20b", requirements=system_prompt,
+            request=prompt, research=research,
         )
-        return GroqProvider._response_content(response)

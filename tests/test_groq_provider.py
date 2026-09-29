@@ -8,12 +8,15 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import httpx
+from groq import BadRequestError
 from pydantic import ValidationError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from agents.email_writer import EmailDraft, EmailWriter, EmailWriterInput
 from providers.groq import GroqProvider
+from providers.errors import failure_message
 
 
 def completion(content, finish_reason="stop"):
@@ -96,6 +99,58 @@ class GroqProviderTests(unittest.TestCase):
         self.create.side_effect = TimeoutError("timeout")
         with self.assertRaises(TimeoutError):
             self.structured()
+
+    def test_research_instructions_are_not_formatter_instructions(self):
+        self.create.side_effect = [completion("Office A: https://a.example"), completion('{"candidates": []}')]
+        self.provider.search_web(system_prompt="You must search the live web. Return candidates as JSON.", user_prompt="Stuttgart")
+        research, formatter = [call.kwargs for call in self.create.call_args_list]
+        self.assertEqual(research["tool_choice"], "required")
+        self.assertNotIn("response_format", research)
+        self.assertEqual(formatter["tool_choice"], "none")
+        self.assertNotIn("tools", formatter)
+        self.assertNotIn("You must search the live web", formatter["messages"][0]["content"])
+        self.assertIn("offline JSON formatter", formatter["messages"][0]["content"])
+        data = json.loads(formatter["messages"][1]["content"])
+        self.assertEqual(data["research"], "Office A: https://a.example")
+        self.assertEqual(data["request"], "Stuttgart")
+
+    def test_tool_call_rejection_retries_only_formatting_with_same_research(self):
+        error = BadRequestError(
+            "Tool choice is none, but model called a tool",
+            response=httpx.Response(400, request=httpx.Request("POST", "https://api.groq.com")),
+            body={"code": "tool_use_failed", "message": "private provider content"},
+        )
+        self.create.side_effect = [completion("Office A: https://a.example"), error, completion('{"candidates": []}')]
+        self.assertEqual(self.provider.search_web(system_prompt="Search and return JSON", user_prompt="Stuttgart"), {"candidates": []})
+        requests = [call.kwargs for call in self.create.call_args_list]
+        self.assertEqual(sum("tools" in request for request in requests), 1)
+        self.assertEqual(requests[1]["messages"][1], requests[2]["messages"][1])
+        self.assertNotIn("private provider content", str(requests))
+
+    def test_formatting_retry_is_bounded_and_other_bad_requests_are_not_retried(self):
+        for code, expected_calls in (("tool_use_failed", 3), ("json_validate_failed", 3), ("model_not_found", 2)):
+            with self.subTest(code=code):
+                self.create.reset_mock()
+                error = BadRequestError(
+                    "Rejected", response=httpx.Response(400, request=httpx.Request("POST", "https://api.groq.com")),
+                    body={"error": {"code": code}},
+                )
+                self.create.side_effect = [completion("Research"), error, error]
+                with self.assertRaises(BadRequestError):
+                    self.provider.search_web(system_prompt="JSON", user_prompt="Stuttgart")
+                self.assertEqual(self.create.call_count, expected_calls)
+
+    def test_formatting_error_explains_the_failure_without_exposing_response(self):
+        error = BadRequestError(
+            "private provider response", response=httpx.Response(400, request=httpx.Request("POST", "https://api.groq.com")),
+            body={"error": {"code": "tool_use_failed", "failed_generation": "private data"}},
+        )
+        wrapped = RuntimeError("Discovery failed")
+        wrapped.__cause__ = error
+        message = failure_message(wrapped)
+        self.assertIn("could not format", message)
+        self.assertNotIn("private", message)
+        self.assertNotIn("supports", message)
 
     def test_existing_entry_points_return_json_and_text(self):
         calls = (
