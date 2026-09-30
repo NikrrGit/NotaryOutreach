@@ -6,9 +6,33 @@ import unittest
 from unittest.mock import patch
 
 from notaryoutreach.config import ConfigurationError, load_config
+from providers.errors import ProviderConfigurationError, failure_message
+from providers.settings import provider_settings
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_provider_setup_errors_are_actionable_without_exposing_values(self):
+        cases = [
+            ({"OPENROUTER_API_KEY": "private-key"}, "GROQ_API_KEY"),
+            ({"LLM_PROVIDER": "openrouter"}, "OPENROUTER_API_KEY"),
+            ({"LLM_PROVIDER": "private-value"}, "LLM_PROVIDER"),
+            ({"LLM_PROVIDER": "openai_compatible", "LLM_API_KEY": "private-key", "LLM_MODEL": "test",
+              "LLM_BASE_URL": "https://user:private-value@example.org/v1"}, "LLM_BASE_URL"),
+        ]
+        for values, setting in cases:
+            with self.subTest(setting=setting), patch.dict("os.environ", values, clear=True):
+                with self.assertRaises(ProviderConfigurationError) as caught:
+                    provider_settings(values, require_key=True)
+                message = failure_message(caught.exception)
+                self.assertIn(setting, message)
+                self.assertIn("Provider setup error", message)
+                self.assertNotIn("invalid result", message)
+                self.assertNotIn("private-", message)
+                with self.assertRaises(ConfigurationError) as wrapped:
+                    load_config("/nonexistent/provider-test.env", require_api_key=True)
+                self.assertEqual(failure_message(wrapped.exception), message)
+        self.assertNotIn("private-value", failure_message(ValueError("private-value")))
+
     def test_local_defaults_need_no_credentials(self):
         with TemporaryDirectory() as directory, patch.dict("os.environ", {}, clear=True):
             path = Path(directory) / ".env"
