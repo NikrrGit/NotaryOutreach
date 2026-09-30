@@ -45,6 +45,39 @@ class UITests(unittest.TestCase):
         self.app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "src/ui/app.py"), default_timeout=15).run()
         self.assertFalse(self.app.exception)
 
+    def test_missing_provider_selection_can_be_fixed_and_saved_search_restarted(self):
+        env = self.storage.path.parent / ".env"
+        env.write_text("OPENROUTER_API_KEY=private-test-key\n")
+        self.service.env_file = env
+        self.service.agents = (None, *self.service.agents[1:])
+        provider = Mock()
+        provider.search.return_value = '{"candidates":[{"name":"Example","city":"Berlin","source_url":"https://example.org"}]}'
+        with patch.dict("os.environ", {"DATABASE_PATH": str(self.storage.path)}, clear=True), patch(
+            "providers.clients.create_provider", return_value=provider,
+        ) as factory:
+            next(widget for widget in self.app.text_input if widget.label == "Location").set_value("Berlin")
+            next(button for button in self.app.button if button.label == "Start search").click().run()
+            self.assertFalse(self.app.exception)
+            message = self.app.error[0].value
+            self.assertIn("GROQ_API_KEY", message)
+            self.assertIn("LLM_PROVIDER", message)
+            self.assertNotIn("invalid result", message)
+            self.assertNotIn("private-test-key", message)
+            factory.assert_not_called()
+            job = self.service.list_jobs()[0]
+            self.assertEqual(job["status"], "failed")
+            self.assertEqual(self.app.button(key=f"run-{job['id']}").label, "Start saved search")
+            env.write_text("LLM_PROVIDER=openrouter\nOPENROUTER_API_KEY=private-test-key\n")
+            self.app.button(key=f"run-{job['id']}").click().run()
+            self.assertFalse(self.app.exception)
+            self.assertFalse(self.app.error)
+            self.assertEqual(factory.call_args.args[0].name, "openrouter")
+            self.assertEqual(self.service.load_job(job["id"])["status"], "ready_for_review")
+            self.assertEqual(len(self.service.list_jobs()), 1)
+            self.assertEqual(len(self.app.dataframe[0].value), 1)
+            self.assertTrue(any(widget.label == "Email" and not widget.disabled for widget in self.app.text_area))
+            provider.close.assert_called_once()
+
     def test_both_search_modes_execute_only_on_submit(self):
         app = self.app
         for target in ("Notary", "Venture Capital"):
