@@ -10,6 +10,8 @@ def failure_message(exc: Exception) -> str:
     status = getattr(current, "status_code", None)
     if status in (401, 403):
         return "The provider rejected access. Check the selected API key and model permissions."
+    if status == 402:
+        return "The provider requires more credits. Check your balance and key spending limit, then retry."
     if status == 404:
         return "The selected model is unavailable. Check LLM_MODEL and SEARCH_MODEL, then retry the search."
     if status == 429:

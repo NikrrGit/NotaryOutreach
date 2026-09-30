@@ -8,10 +8,12 @@ DEFAULT_MODELS = {
     "groq": "openai/gpt-oss-20b",
     "openai": "gpt-4.1-mini",
     "anthropic": "claude-sonnet-4-6",
+    "openrouter": "openai/gpt-4.1-mini",
 }
 KEY_NAMES = {
     "groq": "GROQ_API_KEY", "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY", "openai_compatible": "LLM_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
 }
 
 
@@ -29,18 +31,24 @@ def provider_settings(values: dict, *, search: bool = False, require_key: bool =
     primary = (values.get("LLM_PROVIDER") or "groq").strip().lower()
     name = ((values.get("SEARCH_PROVIDER") or primary) if search else primary).strip().lower()
     if name not in KEY_NAMES:
-        raise ValueError("Provider must be groq, openai, anthropic, or openai_compatible.")
+        raise ValueError("Provider must be groq, openai, anthropic, openrouter, or openai_compatible.")
     if search and name == "openai_compatible":
-        raise ValueError("Set SEARCH_PROVIDER to groq, openai, or anthropic for live discovery.")
+        raise ValueError("Set SEARCH_PROVIDER to groq, openai, anthropic, or openrouter for live discovery.")
     key_name = KEY_NAMES[name]
     key = (values.get(key_name) or "").strip() or None
     if require_key and key is None:
         raise ValueError(f"Set {key_name} in the environment or .env file.")
-    model = (values.get("LLM_MODEL") or "").strip() if not search else ""
+    model = (values.get("LLM_MODEL") or "").strip() if not search or (name == primary == "openrouter") else ""
     model = model or DEFAULT_MODELS.get(name, "")
     search_model = (values.get("SEARCH_MODEL") or "").strip()
     search_model = search_model or ("openai/gpt-oss-120b" if name == "groq" else DEFAULT_MODELS.get(name, ""))
+    if name == "openrouter":
+        search_model = (values.get("SEARCH_MODEL") or "").strip() or model
+        if ":online" in model:
+            raise ValueError("Remove :online from LLM_MODEL; OpenRouter web search is enabled only for discovery.")
     base_url = None
+    if name == "openrouter":
+        base_url = "https://openrouter.ai/api/v1"
     if name == "openai_compatible":
         base_url = (values.get("LLM_BASE_URL") or "").strip()
         parsed = urlsplit(base_url)

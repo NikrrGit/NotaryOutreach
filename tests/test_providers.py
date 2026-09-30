@@ -24,7 +24,7 @@ from storage.sqlite import SQLiteStorage
 class ProviderTests(unittest.TestCase):
     def test_settings_select_keys_models_and_keep_secrets_private(self):
         for name, key_name in (("groq", "GROQ_API_KEY"), ("openai", "OPENAI_API_KEY"),
-                               ("anthropic", "ANTHROPIC_API_KEY")):
+                               ("anthropic", "ANTHROPIC_API_KEY"), ("openrouter", "OPENROUTER_API_KEY")):
             with self.subTest(provider=name), TemporaryDirectory() as directory:
                 env = Path(directory) / ".env"
                 env.write_text(f"LLM_PROVIDER={name}\n{key_name}=file-secret\n")
@@ -170,7 +170,7 @@ class ProviderTests(unittest.TestCase):
                 provider.close.assert_called_once()
 
     def test_all_providers_run_both_targets_and_preserve_reviews(self):
-        for name in ("groq", "openai", "anthropic", "openai_compatible"):
+        for name in ("groq", "openai", "anthropic", "openai_compatible", "openrouter"):
             for target in ("notary", "vc"):
                 with self.subTest(provider=name, target=target):
                     self._run_workflow(name, target)
@@ -199,7 +199,10 @@ class ProviderTests(unittest.TestCase):
                 return httpx.Response(400, json={"error": {
                     "code": "tool_use_failed", "message": "Tool choice is none, but model called a tool",
                 }})
-            research = "tools" in body
+            research = "tools" in body or "plugins" in body
+            if name == "openrouter":
+                self.assertEqual(str(request.url), "https://openrouter.ai/api/v1/chat/completions")
+                self.assertEqual(request.headers["authorization"], "Bearer test-key")
             content = json.dumps({"candidates": [candidate]} if research else next(payloads))
             if request.url.path.endswith("/responses"):
                 output = [{"type": "message", "id": "msg_1", "role": "assistant", "status": "completed",
@@ -220,10 +223,16 @@ class ProviderTests(unittest.TestCase):
             else:
                 data = {"id": "chat_1", "object": "chat.completion", "created": 1, "model": body["model"],
                         "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": content}}]}
+                if name == "openrouter" and research:
+                    data["choices"][0]["message"]["annotations"] = [{"type": "url_citation", "url_citation": {
+                        "url": "https://example.org", "title": "Example", "content": quote,
+                        "start_index": 0, "end_index": 7,
+                    }}]
             return httpx.Response(200, json=data)
 
         sdk, patch_path = {"openai": (OpenAI, "openai.OpenAI"), "anthropic": (Anthropic, "anthropic.Anthropic"),
                            "groq": (Groq, "providers.groq.Groq"),
+                           "openrouter": (OpenAI, "openai.OpenAI"),
                            "openai_compatible": (OpenAI, "openai.OpenAI")}[name]
         clients = []
 
@@ -262,6 +271,11 @@ class ProviderTests(unittest.TestCase):
             if name == "groq":
                 self.assertEqual(requests[0]["tools"], [{"type": "browser_search"}])
                 self.assertNotIn("response_format", requests[0])
+            elif name == "openrouter":
+                self.assertEqual(requests[0]["plugins"], [{"id": "web", "engine": "exa", "max_results": 10}])
+                self.assertTrue(all("plugins" not in request and "tools" not in request for request in requests[1:]))
+                self.assertIn("https://example.org", requests[1]["messages"][1]["content"])
+                self.assertTrue(all(request["model"] == "openai/gpt-4.1-mini" for request in requests))
             else:
                 self.assertIn("tools", requests[0])
                 self.assertTrue(all("tools" not in request for request in requests[1:]))

@@ -11,7 +11,7 @@ Outreach reduces the manual work of finding candidates, checking their websites,
 
 ## Quick start
 
-You need Git, [uv](https://docs.astral.sh/uv/getting-started/installation/), and an API key from Groq, OpenAI, or Anthropic. The project uses Python 3.13.
+You need Git, [uv](https://docs.astral.sh/uv/getting-started/installation/), and an API key from Groq, OpenAI, Anthropic, or OpenRouter. The project uses Python 3.13.
 
 ```sh
 git clone https://github.com/NikrrGit/NotaryOutreach.git
@@ -47,6 +47,7 @@ Set `LLM_PROVIDER` and its matching API key in `.env`; no code changes are neede
 | `groq` (default) | `GROQ_API_KEY` | `openai/gpt-oss-20b` | `openai/gpt-oss-120b` |
 | `openai` | `OPENAI_API_KEY` | `gpt-4.1-mini` | `gpt-4.1-mini` |
 | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` | `claude-sonnet-4-6` |
+| `openrouter` | `OPENROUTER_API_KEY` | `openai/gpt-4.1-mini` | Same as generation |
 
 For Anthropic, for example:
 
@@ -55,9 +56,27 @@ LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=your_anthropic_api_key
 ```
 
-Groq discovery uses [browser search](https://console.groq.com/docs/tool-use/built-in-tools/browser-search). The retired `groq/compound` model is no longer the default; remove any old `SEARCH_MODEL=groq/compound` override. Existing Groq API keys still work with supported models. Set `LLM_MODEL` to override generation and `SEARCH_MODEL` to override discovery. The search model must support its provider's native web-search tool, and your account must have access. There is no automatic fallback to another provider. Restart the app after changing settings.
+Groq discovery uses [browser search](https://console.groq.com/docs/tool-use/built-in-tools/browser-search). The retired `groq/compound` model is no longer the default; remove any old `SEARCH_MODEL=groq/compound` override. Existing Groq API keys still work with supported models. Set `LLM_MODEL` to override generation and `SEARCH_MODEL` to override discovery. Groq, OpenAI, and Anthropic search models must support their provider's native web-search tool. Your account must have model access. There is no automatic fallback to another provider. Restart the app after changing settings.
 
 OpenAI and Anthropic discovery use [OpenAI web search](https://developers.openai.com/api/docs/guides/tools-web-search) and [Anthropic web search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool), followed by a separate call to format the research as JSON. Web-search charges and token usage apply.
+
+### OpenRouter: one key for the full workflow
+
+Set these values in `.env`, replacing any previous provider and model settings:
+
+```dotenv
+LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=your_openrouter_api_key
+LLM_MODEL=openai/gpt-4.1-mini
+SEARCH_PROVIDER=openrouter
+SEARCH_MODEL=
+```
+
+Restart the app and click **Retry search**. One OpenRouter key handles discovery, verification, drafting, and evaluation for both Notary and VC searches. No separate OpenAI or Exa key is needed. `LLM_BASE_URL` and `LLM_API_KEY` are only used by the generic compatible provider.
+
+Discovery uses OpenRouter's [web-search plugin](https://openrouter.ai/docs/guides/features/plugins/web-search) with the Exa engine and up to 10 search results. It requires returned source citations before formatting contacts. Search and model usage consume OpenRouter credits, including when using a free model; check your balance and key spending limit if a request fails with a credits error.
+
+Use an OpenRouter model ID such as `openai/gpt-4.1-mini` in `LLM_MODEL`. Discovery uses that model unless `SEARCH_MODEL` is set. Omit the `:online` suffix: the app enables search for discovery itself. Models must follow JSON instructions; responses are validated locally.
 
 ### Other OpenAI-compatible endpoints
 
@@ -72,7 +91,7 @@ SEARCH_PROVIDER=openai
 OPENAI_API_KEY=your_openai_api_key
 ```
 
-Replace the endpoint and model with your provider's values. Local servers can use an HTTP URL and a nonempty placeholder key if they do not require authentication. This supports compatible APIs, not arbitrary SDKs. `SEARCH_PROVIDER` can be `groq`, `openai`, or `anthropic`; provide that provider's key too.
+Replace the endpoint and model with your provider's values. Local servers can use an HTTP URL and a nonempty placeholder key if they do not require authentication. This supports compatible APIs, not arbitrary SDKs. `SEARCH_PROVIDER` can be `groq`, `openai`, `anthropic`, or `openrouter`; provide that provider's key too.
 
 ## Run your first search
 
@@ -157,7 +176,7 @@ Commands return JSON on stdout and diagnostics on stderr. `notaryoutreach` is an
 | `LLM_PROVIDER` | `groq` | Provider for verification, drafting, and evaluation |
 | Provider API key | None | Use the matching key above; saved results can be browsed without it |
 | `LLM_MODEL` | Provider default | Generation model override |
-| `SEARCH_PROVIDER` | Same as `LLM_PROVIDER` | Native provider for discovery |
+| `SEARCH_PROVIDER` | Same as `LLM_PROVIDER` | Provider for discovery, including OpenRouter |
 | `SEARCH_MODEL` | Search provider default | Live search model override |
 | `LLM_BASE_URL`, `LLM_API_KEY` | None | Custom endpoint URL and key; used only for `openai_compatible` |
 | `DATABASE_PATH` | `data/outreach.db` | Application results and review history |
