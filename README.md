@@ -192,6 +192,7 @@ Results are stored locally, but agent calls send search details, startup descrip
 
 - **Interrupted search:** Select **Resume search** in Streamlit when available, or use `outreach resume JOB_ID`. If no checkpoint exists, use **Start saved search** or `outreach run JOB_ID`.
 - **Missing key:** Set the API key matching `LLM_PROVIDER` (and `SEARCH_PROVIDER` if different) in `.env` and restart the app. The configuration check below validates settings; it does not test the key against the provider.
+- **Asked for a Groq key when using OpenRouter:** Set `LLM_PROVIDER=openrouter` and `SEARCH_PROVIDER=openrouter`. Adding a key alone does not select a provider. Restart the app, then click **Start saved search** to retry a search that failed before research began.
 - **No draft or manual review required:** Inspect the visible errors and evidence. Correct the issue and click **Retry search**. Contacts without AI drafts still offer a default email template.
 - **One local user:** Run one application process against the database files. Avoid running CLI workflows alongside Streamlit on the same files. Authentication, background workers, and multi-user hosting are outside this MVP.
 
