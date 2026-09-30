@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
+from .errors import ProviderConfigurationError
+
 
 DEFAULT_MODELS = {
     "groq": "openai/gpt-oss-20b",
@@ -31,13 +33,16 @@ def provider_settings(values: dict, *, search: bool = False, require_key: bool =
     primary = (values.get("LLM_PROVIDER") or "groq").strip().lower()
     name = ((values.get("SEARCH_PROVIDER") or primary) if search else primary).strip().lower()
     if name not in KEY_NAMES:
-        raise ValueError("Provider must be groq, openai, anthropic, openrouter, or openai_compatible.")
+        raise ProviderConfigurationError("Set LLM_PROVIDER and SEARCH_PROVIDER to groq, openai, anthropic, openrouter, or openai_compatible.")
     if search and name == "openai_compatible":
-        raise ValueError("Set SEARCH_PROVIDER to groq, openai, anthropic, or openrouter for live discovery.")
+        raise ProviderConfigurationError("Set SEARCH_PROVIDER to groq, openai, anthropic, or openrouter for live discovery.")
     key_name = KEY_NAMES[name]
     key = (values.get(key_name) or "").strip() or None
     if require_key and key is None:
-        raise ValueError(f"Set {key_name} in the environment or .env file.")
+        raise ProviderConfigurationError(
+            f"Set {key_name} in the environment or .env file. "
+            "If you use another provider, change LLM_PROVIDER and SEARCH_PROVIDER to match your key."
+        )
     model = (values.get("LLM_MODEL") or "").strip() if not search or (name == primary == "openrouter") else ""
     model = model or DEFAULT_MODELS.get(name, "")
     search_model = (values.get("SEARCH_MODEL") or "").strip()
@@ -45,7 +50,7 @@ def provider_settings(values: dict, *, search: bool = False, require_key: bool =
     if name == "openrouter":
         search_model = (values.get("SEARCH_MODEL") or "").strip() or model
         if ":online" in model:
-            raise ValueError("Remove :online from LLM_MODEL; OpenRouter web search is enabled only for discovery.")
+            raise ProviderConfigurationError("Remove :online from LLM_MODEL; OpenRouter web search is enabled only for discovery.")
     base_url = None
     if name == "openrouter":
         base_url = "https://openrouter.ai/api/v1"
@@ -53,7 +58,7 @@ def provider_settings(values: dict, *, search: bool = False, require_key: bool =
         base_url = (values.get("LLM_BASE_URL") or "").strip()
         parsed = urlsplit(base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise ValueError("Set LLM_BASE_URL to an HTTP(S) API URL without credentials, query, or fragment.")
+            raise ProviderConfigurationError("Set LLM_BASE_URL to an HTTP(S) API URL without credentials, query, or fragment.")
         if not model:
-            raise ValueError("Set LLM_MODEL for the OpenAI-compatible endpoint.")
+            raise ProviderConfigurationError("Set LLM_MODEL for the OpenAI-compatible endpoint.")
     return ProviderSettings(name, model, key, search_model, base_url)

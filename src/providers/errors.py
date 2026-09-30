@@ -1,6 +1,10 @@
 """Actionable diagnostics without provider response bodies or credentials."""
 
 
+class ProviderConfigurationError(ValueError):
+    """A configuration problem with an application-authored, safe message."""
+
+
 def failure_message(exc: Exception) -> str:
     current = exc
     for _ in range(5):
