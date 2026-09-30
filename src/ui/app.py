@@ -34,9 +34,8 @@ def execute_job(service: OutreachService, job_id: str, *, resume: bool = False) 
             st.session_state["notice_level"] = "success"
     except Exception as exc:
         st.session_state["notice"] = failure_message(exc) + " " + (
-            "Search could not finish. Your saved search is available below. "
-            "Check your selected provider’s API key and connection, then use Start or Resume to retry. "
-            "If another search is running, wait for it to finish."
+            "Your search is saved below. Fix the reported issue, then use "
+            "Start saved search or Resume search to retry."
         )
         st.session_state["notice_level"] = "error"
     st.rerun()
