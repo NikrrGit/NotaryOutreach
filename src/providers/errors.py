@@ -11,6 +11,8 @@ def failure_message(exc: Exception) -> str:
         if current.__cause__ is None:
             break
         current = current.__cause__
+    if isinstance(current, ProviderConfigurationError):
+        return "Provider setup error: " + str(current)
     status = getattr(current, "status_code", None)
     if status in (401, 403):
         return "The provider rejected access. Check the selected API key and model permissions."
