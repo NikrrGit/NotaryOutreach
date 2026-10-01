@@ -17,12 +17,13 @@ def render_email_setup(service) -> None:
         current = None
     if st.session_state.pop("mail_clear_password", False):
         st.session_state["mail_password"] = ""
-    with st.expander("Email sending setup", expanded=current is None):
+    notice = st.session_state.pop("mail_setup_notice", None)
+    with st.expander("Email sending setup (optional)", expanded=notice is not None):
+        st.caption("Only needed to send directly from this app. Open in email app works without connecting an account here.")
         if current:
             st.success(f"Sending account: {current.sender}")
         else:
             st.info("Connect your email account to send reviewed drafts directly from this app.")
-        notice = st.session_state.pop("mail_setup_notice", None)
         if notice:
             (st.success if notice["ok"] else st.error)(notice["message"])
         managed = any(key in os.environ for key in (
