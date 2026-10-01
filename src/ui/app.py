@@ -122,39 +122,42 @@ def render_draft(service: OutreachService, job_id: str, draft: dict, results: di
             st.warning("A send was started but delivery is unconfirmed. Check your mail provider before creating another copy.")
         else:
             st.error(delivery.get("error") or "Sending failed. Check SMTP settings and retry.")
-    try:
-        mail = load_mail_settings(service.env_file)
-        st.caption(f"From: {mail.sender}")
-        configured = True
-    except ValueError as exc:
-        configured = False
-        st.warning("Sending from this app is not configured. " + str(exc))
-        st.caption("Your AI provider key generates drafts. Sending needs your email account; see Email sending setup in the sidebar.")
-        if address and not blocked:
-            compose_url = f"mailto:{quote(address, safe='@')}?" + urlencode({"subject": subject, "body": body}, quote_via=quote)
-            st.link_button("Open in email app", compose_url, key=f"compose-{draft_id}")
-            st.caption("Opens this draft in your configured mail app. Review and send there; delivery will not be recorded here.")
-    st.caption("Suitability verification does not block sending a reviewed email.")
-    sender = mail.sender if configured else ""
-    fingerprint = sha256(f"{sender}\0{recipient}\0{subject}\0{body}".encode()).hexdigest()[:16]
-    confirmed = st.checkbox("I reviewed this recipient and message", key=f"confirm-{draft_id}-{fingerprint}", disabled=blocked)
-    if st.button("Send email", key=f"send-{draft_id}", type="primary",
-                 disabled=not configured or not confirmed or not address or blocked):
+    if address and not blocked:
+        compose_url = f"mailto:{quote(address, safe='@')}?" + urlencode({"subject": subject, "body": body}, quote_via=quote)
+        st.link_button("Open in email app", compose_url, key=f"compose-{draft_id}", type="primary")
+    st.caption("Opens the recipient, subject, and edited message in your default email app. Choose your sending account and click Send there.")
+    st.caption("No email connection or app password is needed here. A default mail app must be configured on your device; delivery is not tracked here.")
+
+    with st.expander("Send directly from this app (optional)"):
         try:
-            with st.spinner("Sending email…"):
-                if template:
-                    draft_id = service.create_draft(job_id, draft["candidate_id"], subject=subject, body=body)
-                elif changed:
-                    draft_id = service.edit_email(job_id, draft_id, subject=subject, body=body)
-                st.session_state.pop(f"version-{draft['candidate_id']}", None)
-                service.send_draft(job_id, draft_id, recipient=recipient, confirmed=True)
-        except Exception as exc:
-            from services.email_delivery import DeliveryError
-            st.session_state["notice"] = str(exc) if isinstance(exc, (ValueError, DeliveryError)) else "Sending could not be confirmed. Check delivery history before retrying."
-            st.session_state["notice_level"] = "error"
-        else:
-            st.session_state["notice"] = "Email submitted to your mail server."
-        st.rerun()
+            mail = load_mail_settings(service.env_file)
+            st.caption(f"From: {mail.sender}")
+            configured = True
+        except ValueError as exc:
+            configured = False
+            st.info("Direct sending needs an email account. Connect it under Email sending setup in the sidebar.")
+            st.caption(str(exc))
+        st.caption("Suitability verification does not block sending a reviewed email.")
+        sender = mail.sender if configured else ""
+        fingerprint = sha256(f"{sender}\0{recipient}\0{subject}\0{body}".encode()).hexdigest()[:16]
+        confirmed = st.checkbox("I reviewed this recipient and message", key=f"confirm-{draft_id}-{fingerprint}", disabled=blocked)
+        if st.button("Send email", key=f"send-{draft_id}",
+                     disabled=not configured or not confirmed or not address or blocked):
+            try:
+                with st.spinner("Sending email…"):
+                    if template:
+                        draft_id = service.create_draft(job_id, draft["candidate_id"], subject=subject, body=body)
+                    elif changed:
+                        draft_id = service.edit_email(job_id, draft_id, subject=subject, body=body)
+                    st.session_state.pop(f"version-{draft['candidate_id']}", None)
+                    service.send_draft(job_id, draft_id, recipient=recipient, confirmed=True)
+            except Exception as exc:
+                from services.email_delivery import DeliveryError
+                st.session_state["notice"] = str(exc) if isinstance(exc, (ValueError, DeliveryError)) else "Sending could not be confirmed. Check delivery history before retrying."
+                st.session_state["notice_level"] = "error"
+            else:
+                st.session_state["notice"] = "Email submitted to your mail server."
+            st.rerun()
 
     if not template:
         with st.expander("Quality checks and review history"):
