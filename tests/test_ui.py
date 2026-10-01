@@ -275,7 +275,8 @@ class UITests(unittest.TestCase):
         app.session_state["selected_job"] = job
         with patch.dict("os.environ", {"SMTP_HOST": "", "SMTP_FROM": ""}), patch("services.email_delivery.smtplib.SMTP") as smtp:
             app.run()
-            self.assertTrue(any("SMTP_HOST" in item.value for item in app.warning))
+            self.assertFalse(app.warning)
+            self.assertTrue(any("SMTP_HOST" in item.value for item in app.caption))
             self.assertTrue(any("did not confirm a match" in item.value for item in app.info))
             subject, body = "UG & GmbH?", "Guten Tag,\nGründung & Termin + Rückfrage"
             app.text_input(key=f"subject-{template}").set_value(subject)
@@ -294,6 +295,7 @@ class UITests(unittest.TestCase):
                 app.run()
                 next(item for item in app.checkbox if item.label == "I reviewed this recipient and message").check().run()
                 self.assertFalse(app.button(key=f"send-{template}").disabled)
+                self.assertTrue(any(item.proto.label == "Open in email app" for item in app.get("link_button")))
             self.assertFalse(app.exception)
             self.assertEqual(self.service.load_results(job)["deliveries"], [])
             smtp.assert_not_called()
