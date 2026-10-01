@@ -117,6 +117,10 @@ SMTP_PASSWORD=your_app_password
 
 Use the host and credentials supplied by your email provider. For implicit TLS, use `SMTP_SECURITY=ssl` and `SMTP_PORT=465`. Keep credentials in `.env`; some providers require an app password. Username and password may both be blank for servers that allow authenticated network relaying. Plain unencrypted SMTP is not supported.
 
+**Gmail / Google Workspace:** Enable 2-Step Verification and [create a Google app password](https://support.google.com/accounts/answer/185833). Use `SMTP_HOST=smtp.gmail.com`, port `587`, and `starttls`; set both `SMTP_FROM` and `SMTP_USERNAME` to your full email address. Paste the app password without spaces into `SMTP_PASSWORD`, then restart the app. Some Workspace accounts restrict app passwords; ask your administrator if unavailable. See [Google's SMTP setup](https://knowledge.workspace.google.com/admin/gmail/send-email-from-a-printer-scanner-or-app).
+
+Without SMTP setup, **Open in email app** opens the edited draft in your configured mail app. Send it there; those deliveries are not tracked here. Suitability being unknown does not block sending: it means website evidence did not confirm the match, not that the recipient's email address is invalid. Review the address and message yourself.
+
 The app sends one message per click, saves the exact draft and recipient, and records the result in SQLite. A successful send means the SMTP server accepted the message, not guaranteed inbox delivery. Refreshing cannot resend the same draft. If a connection fails during submission, the app marks delivery as uncertain and blocks resending that version; check your mail provider before creating another copy. No bulk sends or automatic follow-ups run.
 
 ## How it works
