@@ -54,25 +54,8 @@ def parse_mail_settings(values: dict) -> MailSettings:
 
 
 def load_mail_settings(env_file: str | Path = ".env") -> MailSettings:
-    values = {**dotenv_values(env_file), **os.environ}
-    host = (values.get("SMTP_HOST") or "").strip()
-    sender = (values.get("SMTP_FROM") or "").strip()
-    if not host or not sender:
-        raise ValueError("Set SMTP_HOST and SMTP_FROM in .env to send emails from this app.")
-    security = (values.get("SMTP_SECURITY") or "starttls").strip().lower()
-    if security not in {"starttls", "ssl"}:
-        raise ValueError("SMTP_SECURITY must be starttls or ssl.")
-    try:
-        port = int(values.get("SMTP_PORT") or (465 if security == "ssl" else 587))
-        if not 1 <= port <= 65535:
-            raise ValueError
-    except ValueError:
-        raise ValueError("SMTP_PORT must be between 1 and 65535.") from None
-    username = (values.get("SMTP_USERNAME") or "").strip() or None
-    password = values.get("SMTP_PASSWORD") or None
-    if bool(username) != bool(password):
-        raise ValueError("Set both SMTP_USERNAME and SMTP_PASSWORD for authentication.")
-    return MailSettings(host, port, security, email_address(sender), username, password)
+    """Load a local account without expanding characters in its password."""
+    return parse_mail_settings({**dotenv_values(env_file, interpolate=False), **os.environ})
 
 
 class DeliveryError(RuntimeError):
