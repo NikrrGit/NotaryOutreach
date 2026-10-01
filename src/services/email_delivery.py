@@ -139,16 +139,7 @@ def deliver(settings: MailSettings, *, recipient: str, subject: str, body: str, 
     client = None
     submitting = False
     try:
-        context = ssl.create_default_context()
-        if settings.security == "ssl":
-            client = smtplib.SMTP_SSL(settings.host, settings.port, timeout=30, context=context)
-        else:
-            client = smtplib.SMTP(settings.host, settings.port, timeout=30)
-            client.ehlo()
-            client.starttls(context=context)
-            client.ehlo()
-        if settings.username:
-            client.login(settings.username, settings.password)
+        client = _connect_mail(settings)
         submitting = True
         refused = client.send_message(message, from_addr=settings.sender, to_addrs=[recipient])
         if refused:
