@@ -1,15 +1,42 @@
 """Local account persistence and connection checks without real email."""
 
 import os
+import smtplib
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from services.email_delivery import MailSettings, load_mail_settings, save_mail_settings
+from services.email_delivery import DeliveryError, MailSettings, check_mail_connection, load_mail_settings, save_mail_settings
 
 
 class MailSetupTests(unittest.TestCase):
+    def test_connection_checks_authenticate_and_close_without_sending(self):
+        for security, port, factory_name in (("starttls", 587, "SMTP"), ("ssl", 465, "SMTP_SSL")):
+            settings = MailSettings("smtp.example.org", port, security, "sender@example.org", "username", "private-password")
+            with self.subTest(security=security), patch(f"services.email_delivery.smtplib.{factory_name}") as factory:
+                client = factory.return_value
+                check_mail_connection(settings)
+                client.login.assert_called_once_with("username", "private-password")
+                client.close.assert_called_once()
+                client.send_message.assert_not_called()
+                if security == "starttls":
+                    self.assertEqual([call[0] for call in client.method_calls[:4]], ["ehlo", "starttls", "ehlo", "login"])
+                else:
+                    client.starttls.assert_not_called()
+                client.login.side_effect = smtplib.SMTPAuthenticationError(535, b"private-server-response")
+                with self.assertRaises(DeliveryError) as caught:
+                    check_mail_connection(settings)
+                self.assertIn("sign-in failed", str(caught.exception))
+                self.assertNotIn("private", str(caught.exception))
+                self.assertEqual(client.close.call_count, 2)
+                client.send_message.assert_not_called()
+                factory.side_effect = TimeoutError("private-connection-details")
+                with self.assertRaises(DeliveryError) as caught:
+                    check_mail_connection(settings)
+                self.assertIn("Could not connect", str(caught.exception))
+                self.assertNotIn("private", str(caught.exception))
+
     def test_failed_account_updates_preserve_existing_settings(self):
         settings = MailSettings("smtp.gmail.com", 587, "starttls", "sender@example.org", "sender@example.org", "secret")
         with TemporaryDirectory() as directory, patch.dict("os.environ", {}, clear=True):
