@@ -46,6 +46,49 @@ class UITests(unittest.TestCase):
         self.app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "src/ui/app.py"), default_timeout=15).run()
         self.assertFalse(self.app.exception)
 
+    def test_mail_setup_rejects_bad_sign_in_and_supports_custom_smtp(self):
+        import smtplib
+        from services.email_delivery import load_mail_settings
+
+        env = self.storage.path.parent / ".env"
+        original = "LLM_PROVIDER=openrouter\nOPENROUTER_API_KEY=unchanged\n"
+        env.write_text(original)
+        self.service.env_file = env
+        app = self.app
+        with patch.dict("os.environ", {"DATABASE_PATH": str(self.storage.path)}, clear=True), patch(
+            "services.email_delivery.smtplib.SMTP",
+        ) as smtp, patch("services.email_delivery.smtplib.SMTP_SSL") as secure:
+            smtp.return_value.login.side_effect = smtplib.SMTPAuthenticationError(535, b"private-details")
+            app.run()
+            app.text_input(key="mail_sender").set_value("sender@example.org")
+            app.text_input(key="mail_password").set_value("wrong-secret")
+            next(button for button in app.button if button.label == "Test and save email account").click().run()
+            self.assertFalse(app.exception)
+            self.assertTrue(any("sign-in failed" in item.value for item in app.error))
+            self.assertFalse(any("private-details" in item.value or "wrong-secret" in item.value for item in app.error))
+            self.assertEqual(env.read_text(), original)
+            self.assertEqual(app.text_input(key="mail_password").value, "")
+            smtp.return_value.close.assert_called_once()
+            app.selectbox(key="mail_provider").select("Custom SMTP").run()
+            app.text_input(key="mail_host").set_value("smtp.example.org")
+            app.number_input(key="mail_port").set_value(465)
+            app.selectbox(key="mail_security").select("ssl")
+            app.text_input(key="mail_username").set_value("custom-login")
+            app.text_input(key="mail_password").set_value("secret with spaces")
+            next(button for button in app.button if button.label == "Test and save email account").click().run()
+            self.assertFalse(app.exception)
+            settings = load_mail_settings(env)
+            self.assertEqual((settings.host, settings.port, settings.security), ("smtp.example.org", 465, "ssl"))
+            self.assertEqual(settings.password, "secret with spaces")
+            secure.return_value.login.assert_called_once_with("custom-login", "secret with spaces")
+            self.assertEqual(app.text_input(key="mail_password").value, "")
+            self.assertTrue(env.read_text().startswith(original))
+            with patch.dict("os.environ", {"SMTP_HOST": "override.example.org"}):
+                app.run()
+                self.assertTrue(next(button for button in app.button if button.label == "Test and save email account").disabled)
+            smtp.return_value.send_message.assert_not_called()
+            secure.return_value.send_message.assert_not_called()
+
     def test_new_clone_can_connect_gmail_and_send_a_reviewed_draft(self):
         from services.email_delivery import load_mail_settings
 
