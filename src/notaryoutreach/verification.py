@@ -4,12 +4,13 @@ import argparse
 import json
 import logging
 import re
+import ssl
 import sys
 from dataclasses import replace
 from html import unescape
 from io import BytesIO
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
 
@@ -43,6 +44,10 @@ SYSTEM_PROMPT = (
 )
 
 
+class PageFetchError(ValidationError):
+    """A website download failure with a safe, actionable message."""
+
+
 def fetch_page_text(url: str, service_links: list[str] | None = None, max_chars: int = MAX_PAGE_CHARS, *,
                     research_pattern: str | None = None) -> str:
     normalize_url(url)
@@ -51,20 +56,43 @@ def fetch_page_text(url: str, service_links: list[str] | None = None, max_chars:
         with urlopen(request, timeout=FETCH_TIMEOUT) as response:
             content_type = response.headers.get_content_type()
             if content_type not in {"text/html", "application/xhtml+xml", "text/plain", "application/pdf"}:
-                raise ValidationError("Website did not return HTML or plain text.")
+                raise PageFetchError("The URL returned an unsupported file type; use a website page or PDF.")
             body = response.read(MAX_PAGE_BYTES + 1)
             if len(body) > MAX_PAGE_BYTES:
-                raise ValidationError("Website exceeds the download limit.")
+                raise PageFetchError("The page exceeds the 1 MB download limit.")
             raw = ("\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(body)).pages)
                    if content_type == "application/pdf"
                    else body.decode(response.headers.get_content_charset() or "utf-8", errors="replace"))
+            page_url = response.geturl()
+    except PageFetchError:
+        raise
+    except HTTPError as exc:
+        if exc.code in (401, 403):
+            message = "The website blocked automated access. Open it manually to check this contact."
+        elif exc.code == 404:
+            message = "The website page was not found (HTTP 404)."
+        elif exc.code == 429:
+            message = "The website is limiting requests. Try again later."
+        else:
+            message = f"The website returned HTTP {exc.code}. Try again later."
+        raise PageFetchError(message) from exc
     except (URLError, OSError, ValueError, LookupError) as exc:
-        raise ValidationError("Could not read website text.") from exc
+        cause = getattr(exc, "reason", exc)
+        if isinstance(cause, ssl.SSLError):
+            message = "The website's secure connection could not be verified. Check it manually."
+        elif isinstance(cause, TimeoutError):
+            message = "The website timed out. Try again later."
+        else:
+            message = "The website could not be reached. Check the URL and your connection."
+        raise PageFetchError(message) from exc
     raw = re.sub(r"<(script|style)\b[^>]*>.*?</\1\s*>|<!--.*?-->", " ", raw, flags=re.I | re.S)
-    if service_links is not None:
-        for href in re.findall(r"href\s*=\s*[\"']([^\"']+)[\"']", raw, flags=re.I):
-            link = urljoin(url, unescape(href)).split("#", 1)[0]
-            if (urlsplit(link).hostname == urlsplit(url).hostname
+    if service_links is not None and content_type in {"text/html", "application/xhtml+xml"}:
+        for href in re.findall(r"<a\b[^>]*?\s+href\s*=\s*[\"']([^\"']+)[\"']", raw, flags=re.I):
+            link = urljoin(page_url, unescape(href)).split("#", 1)[0]
+            parsed = urlsplit(link)
+            if (parsed.scheme in {"http", "https"} and parsed.hostname == urlsplit(page_url).hostname
+                    and not parsed.username and not parsed.password
+                    and not parsed.path.startswith("/wp-json/")
                     and re.search(research_pattern or r"gesellschaft|unternehmen|gr[uü](?:e)?nd|gmbh", link, flags=re.I)
                     and link != url and link not in service_links):
                 service_links.append(link)
