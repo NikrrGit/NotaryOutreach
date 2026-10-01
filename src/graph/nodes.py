@@ -139,10 +139,15 @@ class WorkflowNodes:
                     raise ValueError("Verification does not match the requested candidate and criteria.")
                 results.append(result)
                 existing[key] = result
-                errors.extend(WorkflowError(
-                    node="verify", candidate_id=key,
-                    message=f"Verification reported a {failure.stage} failure.",
-                ) for failure in result.errors)
+                for failure in result.errors:
+                    error = WorkflowError(
+                        node="verify", candidate_id=key,
+                        message=f"{candidate.name}: {failure.message}" + (
+                            f" ({failure.source_url})" if failure.source_url else ""
+                        ),
+                    )
+                    if error not in errors and error not in state.get("errors", []):
+                        errors.append(error)
             except Exception as exc:
                 errors.append(_error("verify", exc, candidate))
         return {"verification_results": results, "errors": errors}
