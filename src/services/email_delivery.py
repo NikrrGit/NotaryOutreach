@@ -113,6 +113,20 @@ def _connect_mail(settings: MailSettings):
         raise
 
 
+def check_mail_connection(settings: MailSettings) -> None:
+    """Test server sign-in without sending a message."""
+    try:
+        client = _connect_mail(settings)
+    except smtplib.SMTPAuthenticationError:
+        raise DeliveryError("Email sign-in failed. Check the email address and app password, and whether your account permits SMTP.") from None
+    except Exception:
+        raise DeliveryError("Could not connect to the mail server. Check the host, port, encryption, and your connection.") from None
+    try:
+        client.close()
+    except Exception:
+        pass
+
+
 def deliver(settings: MailSettings, *, recipient: str, subject: str, body: str, message_id: str) -> None:
     """Submit exactly one message; successful SMTP acceptance is not inbox delivery."""
     message = EmailMessage()
