@@ -98,13 +98,23 @@ Replace the endpoint and model with your provider's values. Local servers can us
 1. Choose **Notary** or **Venture Capital** in the sidebar and start a search.
 2. Browse the contacts table and select **Open contact** to see details and sources.
 3. Edit the email beside the contact. A plain default template appears if no AI draft is available.
-4. Check the recipient, facts, and signature. Tick **I reviewed this recipient and message**, then click **Send email**.
+4. Open **Email sending setup** in the sidebar, connect your account, and save it.
+5. Check the recipient, facts, and signature. Tick **I reviewed this recipient and message**, then click **Send email**.
 
 Failed searches show the error directly and offer **Retry search**, which creates a fresh job. Previous searches remain available. Editing saves a new draft version; saved reviews stay attached to their original version. AI evaluation and approval are available under **Quality checks and review history**. Sending is a separate, explicit human decision and does not require an AI passing score.
 
 ## Send from the app
 
-Add your mail provider's SMTP settings to `.env`. Search and editing work without them; direct sending requires them.
+Connect your email account in the app; no configuration-file editing is needed:
+
+1. Open **Email sending setup** in the sidebar.
+2. Choose **Gmail / Google Workspace** and enter your email address and Google app password. For another provider, choose **Custom SMTP** and enter its host, port, encryption, and sign-in details.
+3. Click **Test and save email account**. This checks the connection and sign-in without sending a message. Failed checks leave the previous account unchanged.
+4. Review a draft, replace its signature placeholder, tick the confirmation box, and click **Send email**. No restart is needed after connecting.
+
+The account is saved in this repo's local `.env`, which is ignored by Git. Passwords are stored unencrypted locally, with owner-only file permissions where supported, and are cleared from the form after submission. AI settings are preserved. SMTP environment variables take precedence; remove those overrides before editing the account in the UI.
+
+You can also configure SMTP manually in `.env`. Search and editing work without a mail account:
 
 ```dotenv
 SMTP_HOST=smtp.your-provider.example
@@ -117,7 +127,7 @@ SMTP_PASSWORD=your_app_password
 
 Use the host and credentials supplied by your email provider. For implicit TLS, use `SMTP_SECURITY=ssl` and `SMTP_PORT=465`. Keep credentials in `.env`; some providers require an app password. Username and password may both be blank for servers that allow authenticated network relaying. Plain unencrypted SMTP is not supported.
 
-**Gmail / Google Workspace:** Enable 2-Step Verification and [create a Google app password](https://support.google.com/accounts/answer/185833). Use `SMTP_HOST=smtp.gmail.com`, port `587`, and `starttls`; set both `SMTP_FROM` and `SMTP_USERNAME` to your full email address. Paste the app password without spaces into `SMTP_PASSWORD`, then restart the app. Some Workspace accounts restrict app passwords; ask your administrator if unavailable. See [Google's SMTP setup](https://knowledge.workspace.google.com/admin/gmail/send-email-from-a-printer-scanner-or-app).
+**Gmail / Google Workspace:** Enable 2-Step Verification and [create a Google app password](https://support.google.com/accounts/answer/185833). The Gmail form fills in the server settings and removes spaces from the app password. For manual setup, use `smtp.gmail.com`, port `587`, and `starttls`; set both `SMTP_FROM` and `SMTP_USERNAME` to your full email address. Some Workspace accounts restrict app passwords; ask your administrator if unavailable. See [Google's SMTP setup](https://knowledge.workspace.google.com/admin/gmail/send-email-from-a-printer-scanner-or-app). Password-based SMTP is supported; OAuth sign-in is outside this MVP.
 
 Without SMTP setup, **Open in email app** opens the edited draft in your configured mail app. Send it there; those deliveries are not tracked here. Suitability being unknown does not block sending: it means website evidence did not confirm the match, not that the recipient's email address is invalid. Review the address and message yourself.
 
