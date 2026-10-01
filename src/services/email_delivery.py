@@ -89,6 +89,30 @@ def save_mail_settings(settings: MailSettings, env_file: str | Path = ".env") ->
         Path(temporary).unlink(missing_ok=True)
 
 
+def _connect_mail(settings: MailSettings):
+    """Open an encrypted SMTP session and close partial connections on failure."""
+    client = None
+    try:
+        context = ssl.create_default_context()
+        if settings.security == "ssl":
+            client = smtplib.SMTP_SSL(settings.host, settings.port, timeout=30, context=context)
+        else:
+            client = smtplib.SMTP(settings.host, settings.port, timeout=30)
+            client.ehlo()
+            client.starttls(context=context)
+        client.ehlo()
+        if settings.username:
+            client.login(settings.username, settings.password)
+        return client
+    except Exception:
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
+        raise
+
+
 def deliver(settings: MailSettings, *, recipient: str, subject: str, body: str, message_id: str) -> None:
     """Submit exactly one message; successful SMTP acceptance is not inbox delivery."""
     message = EmailMessage()
