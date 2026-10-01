@@ -135,7 +135,8 @@ def render_draft(service: OutreachService, job_id: str, draft: dict, results: di
             st.link_button("Open in email app", compose_url, key=f"compose-{draft_id}")
             st.caption("Opens this draft in your configured mail app. Review and send there; delivery will not be recorded here.")
     st.caption("Suitability verification does not block sending a reviewed email.")
-    fingerprint = sha256(f"{recipient}\0{subject}\0{body}".encode()).hexdigest()[:16]
+    sender = mail.sender if configured else ""
+    fingerprint = sha256(f"{sender}\0{recipient}\0{subject}\0{body}".encode()).hexdigest()[:16]
     confirmed = st.checkbox("I reviewed this recipient and message", key=f"confirm-{draft_id}-{fingerprint}", disabled=blocked)
     if st.button("Send email", key=f"send-{draft_id}", type="primary",
                  disabled=not configured or not confirmed or not address or blocked):
