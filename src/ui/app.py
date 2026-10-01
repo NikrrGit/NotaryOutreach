@@ -246,12 +246,15 @@ def render_results(service: OutreachService) -> None:
             if candidate.get(field):
                 st.link_button(label, candidate[field])
         with st.expander("Research evidence", expanded=True):
+            st.caption("Suitability checks the match for your search. It does not confirm that the email address can receive mail.")
             verifications = [item for item in results["verifications"] if item["candidate_id"] == candidate_id]
             if not verifications:
-                st.caption("Suitability has not been verified.")
-            for verification in verifications:
+                st.info("Suitability has not been checked. You can still review and send the default email.")
+            for verification in verifications[-1:]:
                 eligible = verification["eligible"]
                 st.write("Suitability:", "Unknown" if eligible is None else "Supported" if eligible else "Not supported")
+                if eligible is None:
+                    st.info("The available website evidence did not confirm a match. You can still send a reviewed email asking about suitability.")
                 st.text(verification["reason"])
                 st.text(verification.get("evidence") or "No supporting evidence recorded.")
     with editor:
