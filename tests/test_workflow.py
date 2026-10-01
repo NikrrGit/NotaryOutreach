@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 from agents.discovery import Candidate
 from agents.email_writer import EmailDraft
-from agents.verification import VerificationResult
+from agents.verification import VerificationFailure, VerificationResult
 from graph.state import EvaluationResult
 from graph.workflow import build_workflow, create_initial_state
 
@@ -40,6 +40,22 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(len(state["email_drafts"]), 1)
         self.assertEqual(state["evaluations"][0].draft_id, state["email_drafts"][0].draft_id)
         self.assertEqual(state["errors"], [])
+
+    def test_fetch_failures_identify_contact_and_url_once_across_retries(self):
+        failure = VerificationFailure(stage="fetch", source_url="https://example.com/services",
+                                      message="The website page was not found (HTTP 404).")
+        self.verifier.verify.return_value = self.result.model_copy(update={
+            "status": "unknown", "evidence_quote": None, "source_url": None, "errors": [failure],
+        })
+        state = self.run_graph()
+        self.assertEqual(state["status"], "manual_review")
+        self.assertEqual(self.verifier.verify.call_count, 3)
+        self.assertEqual(len(state["verification_results"]), 3)
+        self.assertEqual(len(state["errors"]), 1)
+        self.assertIn("Office", state["errors"][0].message)
+        self.assertIn("HTTP 404", state["errors"][0].message)
+        self.assertIn(failure.source_url, state["errors"][0].message)
+        self.writer.write_verified.assert_not_called()
 
     def test_unknown_verification_is_retried(self):
         unknown = self.result.model_copy(update={"status": "unknown"})
