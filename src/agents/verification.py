@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field
 
 from notaryoutreach.providers.groq import assess_formation
-from notaryoutreach.verification import fetch_page_text
+from notaryoutreach.verification import PageFetchError, fetch_page_text
 
 from .discovery import Candidate, OutreachContext
 
@@ -111,12 +111,12 @@ class VerificationAgent:
                 else:
                     text = self.page_reader(url, links)
                 if not isinstance(text, str) or not text.strip():
-                    raise ValueError("No readable text.")
+                    raise PageFetchError("The page contains no readable text.")
                 pages.append(PageContent(source_url=url, text=text.strip()))
             except Exception as exc:
                 errors.append(VerificationFailure(
                     stage="fetch", source_url=url,
-                    message=f"Could not read page ({type(exc).__name__}).",
+                    message=str(exc) if isinstance(exc, PageFetchError) else f"Could not read page ({type(exc).__name__}).",
                 ))
             pending.extend(links)
         return pages, errors
