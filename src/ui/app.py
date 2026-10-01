@@ -289,9 +289,12 @@ def main() -> None:
             st.header("Find contacts")
             render_search(service)
             with st.expander("Email sending setup"):
-                st.caption("Use your email provider's SMTP settings. Add these to .env; use an app password where required.")
-                st.code("SMTP_HOST=smtp.example.com\nSMTP_PORT=587\nSMTP_SECURITY=starttls\nSMTP_FROM=you@example.com\nSMTP_USERNAME=you@example.com\nSMTP_PASSWORD=your_app_password", language="dotenv")
-                st.caption("Use SMTP_SECURITY=ssl and port 465 if required by your provider. Sending happens only when you click Send email.")
+                st.markdown("**Gmail / Google Workspace**")
+                st.markdown("Enable [2-Step Verification](https://myaccount.google.com/security), then [create an app password](https://myaccount.google.com/apppasswords).")
+                st.caption("Add these settings to your local .env file. Use the app password without spaces, not your normal Google password.")
+                st.code("SMTP_HOST=smtp.gmail.com\nSMTP_PORT=587\nSMTP_SECURITY=starttls\nSMTP_FROM=you@gmail.com\nSMTP_USERNAME=you@gmail.com\nSMTP_PASSWORD=your_google_app_password", language="dotenv")
+                st.caption("Restart the app, review the draft, tick the confirmation box, and click Send email. Some Workspace accounts restrict app passwords; ask your administrator if this option is missing.")
+                st.caption("For other email providers, use their SMTP host and credentials. Use SMTP_SECURITY=ssl and port 465 if required. Open in email app works without these settings when a mail app is configured.")
         render_results(service)
     except (sqlite3.Error, OSError):
         st.error("Could not access the local database. Check its location and write permissions, then retry.")
