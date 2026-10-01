@@ -76,7 +76,7 @@ def save_mail_settings(settings: MailSettings, env_file: str | Path = ".env") ->
     if path.is_symlink():
         raise ValueError("Save the email account to a regular .env file, not a symbolic link.")
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    descriptor, temporary = mkstemp(prefix=".env.", suffix=".tmp", dir=path.parent)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as output:
             if path.exists():
