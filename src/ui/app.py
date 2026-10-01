@@ -17,6 +17,7 @@ from services.outreach_service import OutreachService
 from services.email_delivery import default_email, email_address, load_mail_settings
 from providers.errors import failure_message
 from storage.sqlite import SQLiteStorage
+from ui.email_setup import render_email_setup
 
 
 def execute_job(service: OutreachService, job_id: str, *, resume: bool = False) -> None:
@@ -288,13 +289,7 @@ def main() -> None:
         with st.sidebar:
             st.header("Find contacts")
             render_search(service)
-            with st.expander("Email sending setup"):
-                st.markdown("**Gmail / Google Workspace**")
-                st.markdown("Enable [2-Step Verification](https://myaccount.google.com/security), then [create an app password](https://myaccount.google.com/apppasswords).")
-                st.caption("Add these settings to your local .env file. Use the app password without spaces, not your normal Google password.")
-                st.code("SMTP_HOST=smtp.gmail.com\nSMTP_PORT=587\nSMTP_SECURITY=starttls\nSMTP_FROM=you@gmail.com\nSMTP_USERNAME=you@gmail.com\nSMTP_PASSWORD=your_google_app_password", language="dotenv")
-                st.caption("Restart the app, review the draft, tick the confirmation box, and click Send email. Some Workspace accounts restrict app passwords; ask your administrator if this option is missing.")
-                st.caption("For other email providers, use their SMTP host and credentials. Use SMTP_SECURITY=ssl and port 465 if required. Open in email app works without these settings when a mail app is configured.")
+            render_email_setup(service)
         render_results(service)
     except (sqlite3.Error, OSError):
         st.error("Could not access the local database. Check its location and write permissions, then retry.")
