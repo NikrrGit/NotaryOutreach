@@ -46,6 +46,52 @@ class UITests(unittest.TestCase):
         self.app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "src/ui/app.py"), default_timeout=15).run()
         self.assertFalse(self.app.exception)
 
+    def test_new_clone_can_connect_gmail_and_send_a_reviewed_draft(self):
+        from services.email_delivery import load_mail_settings
+
+        env = self.storage.path.parent / ".env"
+        env.write_text("LLM_PROVIDER=openrouter\nOPENROUTER_API_KEY=unchanged\n")
+        self.service.env_file = env
+        job = self.service.create_job(target_type="notary", location="Berlin", company_type="UG")
+        candidate = self.storage.save_record("candidates", dict(job_id=job, target_type="notary", name="Office",
+            city="Berlin", email="office@example.org", source_url="https://example.org"))
+        template = f"template-{candidate}"
+        app = self.app
+        app.session_state["selected_job"] = job
+        with patch.dict("os.environ", {"DATABASE_PATH": str(self.storage.path)}, clear=True), patch(
+            "services.email_delivery.smtplib.SMTP",
+        ) as factory:
+            client = factory.return_value
+            client.send_message.return_value = {}
+            app.run()
+            self.assertTrue(app.button(key=f"send-{template}").disabled)
+            app.text_input(key="mail_sender").set_value("sender@gmail.com")
+            app.text_input(key="mail_password").set_value("abcd efgh ijkl mnop")
+            next(button for button in app.button if button.label == "Test and save email account").click().run()
+            self.assertFalse(app.exception)
+            client.login.assert_called_once_with("sender@gmail.com", "abcdefghijklmnop")
+            client.send_message.assert_not_called()
+            client.close.assert_called_once()
+            self.assertEqual(app.text_input(key="mail_password").value, "")
+            self.assertIn("OPENROUTER_API_KEY=unchanged", env.read_text())
+            self.assertEqual(load_mail_settings(env).sender, "sender@gmail.com")
+            self.assertTrue(app.button(key=f"send-{template}").disabled)
+            body = app.text_area(key=f"body-{template}").value.replace("[Ihr Name]", "Test Sender")
+            app.text_area(key=f"body-{template}").set_value(body).run()
+            next(item for item in app.checkbox if item.label == "I reviewed this recipient and message").check().run()
+            self.assertFalse(app.button(key=f"send-{template}").disabled)
+            app.button(key=f"send-{template}").click().run()
+            self.assertFalse(app.exception)
+            client.send_message.assert_called_once()
+            message = client.send_message.call_args.args[0]
+            self.assertEqual(message["From"], "sender@gmail.com")
+            self.assertEqual(message["To"], "office@example.org")
+            self.assertEqual(message.get_content().strip(), body)
+            self.assertEqual(self.service.load_results(job)["deliveries"][0]["status"], "sent")
+            app.run()
+            self.assertEqual(client.login.call_count, 2)
+            client.send_message.assert_called_once()
+
     def test_missing_provider_selection_can_be_fixed_and_saved_search_restarted(self):
         env = self.storage.path.parent / ".env"
         env.write_text("OPENROUTER_API_KEY=private-test-key\n")
