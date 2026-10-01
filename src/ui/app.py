@@ -6,6 +6,7 @@ import os
 import sqlite3
 import sys
 from uuid import uuid4
+from urllib.parse import quote, urlencode
 
 import streamlit as st
 from dotenv import dotenv_values
@@ -13,7 +14,7 @@ from dotenv import dotenv_values
 # Support direct execution before the new packages are installed.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from services.outreach_service import OutreachService
-from services.email_delivery import default_email, load_mail_settings
+from services.email_delivery import default_email, email_address, load_mail_settings
 from providers.errors import failure_message
 from storage.sqlite import SQLiteStorage
 
@@ -85,6 +86,12 @@ def render_draft(service: OutreachService, job_id: str, draft: dict, results: di
     if template:
         st.caption("Default template. Edit it and replace the signature before sending. It makes no verified claims about this contact.")
     recipient = st.text_input("To", value=candidate.get("email") or "", key=f"recipient-{draft_id}")
+    try:
+        address = email_address(recipient)
+    except ValueError:
+        address = None
+        if recipient.strip():
+            st.warning("Enter one valid recipient email address.")
     if not candidate.get("email"):
         st.caption("No public email was found. Enter an address you have checked, or use the contact's website.")
     subject = st.text_input("Subject", value=draft["subject"], key=f"subject-{draft_id}")
@@ -118,13 +125,19 @@ def render_draft(service: OutreachService, job_id: str, draft: dict, results: di
         mail = load_mail_settings(service.env_file)
         st.caption(f"From: {mail.sender}")
         configured = True
-    except ValueError:
+    except ValueError as exc:
         configured = False
-        st.info("To send here, add your mail account under Email sending setup in the sidebar.")
+        st.warning("Sending from this app is not configured. " + str(exc))
+        st.caption("Your AI provider key generates drafts. Sending needs your email account; see Email sending setup in the sidebar.")
+        if address and not blocked:
+            compose_url = f"mailto:{quote(address, safe='@')}?" + urlencode({"subject": subject, "body": body}, quote_via=quote)
+            st.link_button("Open in email app", compose_url, key=f"compose-{draft_id}")
+            st.caption("Opens this draft in your configured mail app. Review and send there; delivery will not be recorded here.")
+    st.caption("Suitability verification does not block sending a reviewed email.")
     fingerprint = sha256(f"{recipient}\0{subject}\0{body}".encode()).hexdigest()[:16]
     confirmed = st.checkbox("I reviewed this recipient and message", key=f"confirm-{draft_id}-{fingerprint}", disabled=blocked)
     if st.button("Send email", key=f"send-{draft_id}", type="primary",
-                 disabled=not configured or not confirmed or not recipient.strip() or blocked):
+                 disabled=not configured or not confirmed or not address or blocked):
         try:
             with st.spinner("Sending email…"):
                 if template:
