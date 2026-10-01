@@ -10,6 +10,25 @@ from services.email_delivery import MailSettings, load_mail_settings, save_mail_
 
 
 class MailSetupTests(unittest.TestCase):
+    def test_failed_account_updates_preserve_existing_settings(self):
+        settings = MailSettings("smtp.gmail.com", 587, "starttls", "sender@example.org", "sender@example.org", "secret")
+        with TemporaryDirectory() as directory, patch.dict("os.environ", {}, clear=True):
+            path = Path(directory) / ".env"
+            original = "LLM_PROVIDER=openrouter\nSMTP_FROM=previous@example.org\n"
+            path.write_text(original)
+            with patch.dict("os.environ", {"SMTP_HOST": ""}), self.assertRaisesRegex(ValueError, "override"):
+                save_mail_settings(settings, path)
+            self.assertEqual(path.read_text(), original)
+            with patch("services.email_delivery.os.replace", side_effect=OSError("No space")), self.assertRaises(OSError):
+                save_mail_settings(settings, path)
+            self.assertEqual(path.read_text(), original)
+            self.assertEqual(list(Path(directory).glob(".env.*.tmp")), [])
+            link = Path(directory) / "linked.env"
+            link.symlink_to(path)
+            with self.assertRaisesRegex(ValueError, "symbolic link"):
+                save_mail_settings(settings, link)
+            self.assertEqual(path.read_text(), original)
+
     def test_saved_account_round_trips_and_preserves_other_configuration(self):
         with TemporaryDirectory() as directory, patch.dict("os.environ", {}, clear=True):
             path = Path(directory) / ".env"
