@@ -279,7 +279,7 @@ def main() -> None:
     st.set_page_config(page_title="Outreach", page_icon="✉", layout="wide")
     st.title("Outreach")
     st.caption("Find relevant contacts. Prepare emails. Review every draft.")
-    st.caption("Review contact details, edit the email, and send when you are ready.")
+    st.caption("Edit a draft, then open it in your email app to review and send.")
     if "pending_selection" in st.session_state:
         st.session_state["selected_job"] = st.session_state.pop("pending_selection")
     notice = st.session_state.pop("notice", None)
