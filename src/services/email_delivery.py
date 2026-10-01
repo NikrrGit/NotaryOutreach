@@ -8,8 +8,9 @@ import os
 import re
 import smtplib
 import ssl
+from tempfile import mkstemp
 
-from dotenv import dotenv_values
+from dotenv import dotenv_values, set_key
 
 
 def email_address(value: str) -> str:
@@ -62,6 +63,30 @@ class DeliveryError(RuntimeError):
     def __init__(self, message: str, *, uncertain: bool = False):
         super().__init__(message)
         self.uncertain = uncertain
+
+
+def save_mail_settings(settings: MailSettings, env_file: str | Path = ".env") -> None:
+    """Atomically save an account while preserving unrelated local settings."""
+    values = dict(SMTP_HOST=settings.host, SMTP_PORT=str(settings.port), SMTP_SECURITY=settings.security,
+                  SMTP_FROM=settings.sender, SMTP_USERNAME=settings.username or "", SMTP_PASSWORD=settings.password or "")
+    parse_mail_settings(values)
+    if any(name in os.environ for name in values):
+        raise ValueError("SMTP environment variables override saved accounts. Remove those overrides before saving here.")
+    path = Path(env_file)
+    if path.is_symlink():
+        raise ValueError("Save the email account to a regular .env file, not a symbolic link.")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            if path.exists():
+                output.write(path.read_text(encoding="utf-8"))
+        for name, value in values.items():
+            set_key(temporary, name, value, quote_mode="always")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 def deliver(settings: MailSettings, *, recipient: str, subject: str, body: str, message_id: str) -> None:
