@@ -4,6 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock, patch
+from urllib.parse import parse_qs, urlsplit
 
 from streamlit.testing.v1 import AppTest
 
@@ -172,6 +173,41 @@ class UITests(unittest.TestCase):
         self.assertEqual(len(app.dataframe[0].value), 1)
         self.assertEqual(len(self.service.list_jobs()), 2)
         self.assertNotEqual(app.session_state["selected_job"], failed["id"])
+
+    def test_mail_setup_and_unknown_suitability_do_not_confuse_send_controls(self):
+        job = self.service.create_job(target_type="notary", location="Berlin", company_type="UG")
+        candidate = self.storage.save_record("candidates", dict(job_id=job, target_type="notary", name="Office",
+            city="Berlin", email="office@example.org", source_url="https://example.org"))
+        self.storage.save_record("verifications", dict(candidate_id=candidate, eligible=None, confidence=0,
+            reason="The website did not specify company formation services."))
+        self.service.env_file = self.storage.path.parent / "missing.env"
+        template = f"template-{candidate}"
+        app = self.app
+        app.session_state["selected_job"] = job
+        with patch.dict("os.environ", {"SMTP_HOST": "", "SMTP_FROM": ""}), patch("services.email_delivery.smtplib.SMTP") as smtp:
+            app.run()
+            self.assertTrue(any("SMTP_HOST" in item.value for item in app.warning))
+            self.assertTrue(any("did not confirm a match" in item.value for item in app.info))
+            subject, body = "UG & GmbH?", "Guten Tag,\nGründung & Termin + Rückfrage"
+            app.text_input(key=f"subject-{template}").set_value(subject)
+            app.text_area(key=f"body-{template}").set_value(body).run()
+            next(item for item in app.checkbox if item.label == "I reviewed this recipient and message").check().run()
+            self.assertTrue(app.button(key=f"send-{template}").disabled)
+            link = next(item for item in app.get("link_button") if item.proto.label == "Open in email app")
+            url = urlsplit(link.proto.url)
+            self.assertEqual((url.scheme, url.path), ("mailto", "office@example.org"))
+            self.assertEqual(parse_qs(url.query), {"subject": [subject], "body": [body]})
+            app.text_input(key=f"recipient-{template}").set_value("invalid-address").run()
+            self.assertFalse(any(item.proto.label == "Open in email app" for item in app.get("link_button")))
+            app.text_input(key=f"recipient-{template}").set_value("office@example.org").run()
+            with patch.dict("os.environ", {"SMTP_HOST": "smtp.gmail.com", "SMTP_FROM": "sender@example.org",
+                                          "SMTP_USERNAME": "sender@example.org", "SMTP_PASSWORD": "test-password"}):
+                app.run()
+                next(item for item in app.checkbox if item.label == "I reviewed this recipient and message").check().run()
+                self.assertFalse(app.button(key=f"send-{template}").disabled)
+            self.assertFalse(app.exception)
+            self.assertEqual(self.service.load_results(job)["deliveries"], [])
+            smtp.assert_not_called()
 
     def test_default_draft_can_be_edited_and_sent_without_ai_generation(self):
         job = self.service.create_job(target_type="vc", location="Berlin", startup_description="Security software",
