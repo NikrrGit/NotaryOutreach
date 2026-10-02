@@ -101,13 +101,15 @@ Replace the endpoint and model with your provider's values. Local servers can us
 4. Check the recipient, facts, and signature, then click **Open in email app**.
 5. Choose your personal sending account and click **Send** in your mail app.
 
-No email credentials or SMTP setup are needed in Outreach for this flow. Configure a default email app on your device first. If nothing opens, check your device or browser's default mail handler. You can also copy the subject and message into your usual mail app.
+No email credentials or SMTP setup are needed in Outreach for this flow. Configure a default email app on your device with your personal account signed in. If nothing opens, check your device or browser's default mail handler. You can also copy the subject and message into your usual mail app.
 
-Failed searches show the error directly and offer **Retry search**, which creates a fresh job. Previous searches remain available. Editing saves a new draft version; saved reviews stay attached to their original version. AI evaluation and approval are available under **Quality checks and review history**. Sending is a separate, explicit human decision and does not require an AI passing score.
+Failed searches show the error directly and offer **Retry search**, which creates a fresh job. Previous searches remain available. Click **Save draft** or **Save new version** to keep your edits; saved reviews stay attached to their original version. AI evaluation and approval are available under **Quality checks and review history**. Sending is a separate, explicit human decision and does not require an AI passing score.
 
 ## Open in your email app
 
-**Open in email app** is the primary action for both Notary and VC drafts. It pre-fills the edited recipient, subject, and message, including changes you have not saved as a new draft version. It works without verification, approval, an app password, or a connected SMTP account. Opening a draft does not send it or mark it as sent; emails sent from your mail app are not tracked in Outreach.
+**Open in email app** is the primary action for both Notary and VC drafts. It pre-fills the edited recipient, subject, and message, including changes you have not saved as a new draft version. Enter a valid recipient address if the contact has none. AI suitability verification and draft approval are not required, and you do not need to connect an email account in Outreach.
+
+Opening a draft does not send it or mark it as sent. Review it and click **Send** in your email app; these deliveries are not tracked in Outreach.
 
 ## Optional: send directly from Outreach
 
@@ -156,7 +158,7 @@ flowchart TD
     end
     Evaluate -->|Results| Service
     Service <--> Data[("SQLite: results, reviews, deliveries")]
-    Service -->|Explicit Send email click| SMTP["Your SMTP mail server"]
+    Service -->|Optional: Send email click| SMTP["Your SMTP mail server"]
     Workflow --- Checkpoints[("SQLite: workflow checkpoints")]
 ```
 
