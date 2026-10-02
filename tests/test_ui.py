@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock, patch
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from streamlit.testing.v1 import AppTest
 
@@ -45,6 +45,44 @@ class UITests(unittest.TestCase):
         self.addCleanup(environment.stop)
         self.app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "src/ui/app.py"), default_timeout=15).run()
         self.assertFalse(self.app.exception)
+
+    def test_mail_app_is_primary_for_both_targets_and_saved_or_default_drafts(self):
+        self.service.env_file = self.storage.path.parent / "missing.env"
+        with patch.dict("os.environ", {"DATABASE_PATH": str(self.storage.path)}, clear=True), patch(
+            "services.email_delivery.smtplib.SMTP",
+        ) as smtp, patch("services.email_delivery.smtplib.SMTP_SSL") as secure:
+            for target in ("notary", "vc"):
+                for saved in (False, True):
+                    with self.subTest(target=target, saved=saved):
+                        fields = dict(company_type="UG") if target == "notary" else dict(
+                            startup_description="Security software", industry="Cybersecurity", funding_stage="Seed")
+                        job = self.service.create_job(target_type=target, location="Hamburg" if saved else "Berlin", **fields)
+                        candidate = self.storage.save_record("candidates", dict(job_id=job, target_type=target,
+                            name="Example", city="Berlin", email="original@example.org", source_url="https://example.org"))
+                        draft_id = self.service.create_draft(job, candidate, subject="Original", body="Original body") if saved else f"template-{candidate}"
+                        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "src/ui/app.py"), default_timeout=15)
+                        app.session_state["selected_job"] = job
+                        app.run()
+                        subject, body = "Gründung & Kennenlernen?", "Guten Tag,\nTermin + Rückfrage & text=keine weiteren Empfänger.\nTest Sender"
+                        app.text_input(key=f"recipient-{draft_id}").set_value("edited+contact@example.org")
+                        app.text_input(key=f"subject-{draft_id}").set_value(subject)
+                        app.text_area(key=f"body-{draft_id}").set_value(body).run()
+                        self.assertFalse(app.exception)
+                        link = next(item for item in app.get("link_button") if item.proto.label == "Open in email app")
+                        self.assertEqual(link.proto.type, "primary")
+                        self.assertFalse(link.proto.disabled)
+                        url = urlsplit(link.proto.url)
+                        self.assertEqual((url.scheme, unquote(url.path)), ("mailto", "edited+contact@example.org"))
+                        self.assertEqual(parse_qs(url.query), {"subject": [subject], "body": [body]})
+                        self.assertFalse(next(item for item in app.checkbox if item.label == "I reviewed this recipient and message").value)
+                        for label in ("Email sending setup (optional)", "Send directly from this app (optional)"):
+                            self.assertFalse(next(item for item in app.expander if item.label == label).proto.expanded)
+                        self.assertEqual(self.service.load_results(job)["deliveries"], [])
+                        if saved:
+                            self.assertEqual(self.service.load_results(job)["drafts"][0]["body"], "Original body")
+                        app.run()
+            smtp.assert_not_called()
+            secure.assert_not_called()
 
     def test_mail_setup_rejects_bad_sign_in_and_supports_custom_smtp(self):
         import smtplib
