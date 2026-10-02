@@ -1,8 +1,8 @@
 # Outreach
 
-Find notaries for company formation or venture capital investors for your startup, then prepare evidence-based outreach drafts for human review.
+Find notaries for company formation or venture capital investors for your startup, review their details, and prepare your first email in one local app.
 
-Outreach reduces the manual work of finding candidates, checking their websites, and writing a relevant first email. It collects sources, checks suitability, and generates personalized German email drafts in one local app. Open the draft in your own email app, review it, and send from your personal account. Direct SMTP sending is optional.
+Outreach researches contacts, checks website evidence, and drafts German emails. Edit a draft, open it in your usual email app, and send from your personal account. Clone the repo and add an AI provider key to get started; results and reviews are stored in SQLite on your computer.
 
 | Search | What you provide | What it checks |
 | --- | --- | --- |
@@ -37,6 +37,31 @@ uv run streamlit run src/ui/app.py --server.address 127.0.0.1
 ```
 
 Open the local URL printed in the terminal (usually <http://localhost:8501>). Press `Ctrl+C` to stop. The app creates the database files automatically; no database server or manual migration command is needed.
+
+## Find contacts and prepare an email
+
+1. Choose **Notary** or **Venture Capital** in the sidebar, enter your criteria, and click **Start search**.
+2. Browse names, organizations, cities, email addresses, phone numbers, and websites in the contacts table. Some details may be unavailable.
+3. Select **Open contact** to see its sources and editable email. A default template appears if no AI draft is available.
+4. Check the recipient, facts, and signature. Click **Save draft** or **Save new version** to keep your edits.
+5. Click **Open in email app**, choose your sending account, and click **Send** there.
+
+Previous results remain available under **Saved search**. Reviews stay attached to their original draft version; evaluation and approval are under **Quality checks and review history**.
+
+## Send from your personal account
+
+**Open in email app** is the default action for both Notary and VC drafts. It opens a `mailto:` link with the edited recipient, subject, and message, including edits you have not saved. Your device or browser needs a default mail handler with your account signed in. No email credentials, app password, or extra script are needed in Outreach for this flow.
+
+Opening a draft does not send it. Review the message and click **Send** in your email app. Outreach cannot track emails sent this way or mark them as delivered.
+
+| What you see | What to do |
+| --- | --- |
+| Nothing opens, or the wrong email app opens | Set the preferred app or webmail service as your device or browser's handler for email links. You can also copy the subject and message into your mail app. |
+| A contact has no email address | Enter an address you have checked in **To**, or use the contact's website. A valid recipient is required to show the button. |
+| Suitability is unknown or has not been checked | Review the sources yourself. Suitability describes the match to your search, not whether the mailbox works; it does not block opening the draft. |
+| **Send email** is disabled | This is the optional direct SMTP action. Use **Open in email app**, or [connect an account for direct sending](#optional-send-directly-from-outreach). |
+
+AI evaluation and draft approval are optional for sending. If a draft was already submitted through SMTP or its delivery is uncertain, check the recorded status and your mail provider before creating another copy.
 
 ## Choose your provider
 
@@ -93,24 +118,6 @@ OPENAI_API_KEY=your_openai_api_key
 
 Replace the endpoint and model with your provider's values. Local servers can use an HTTP URL and a nonempty placeholder key if they do not require authentication. This supports compatible APIs, not arbitrary SDKs. `SEARCH_PROVIDER` can be `groq`, `openai`, `anthropic`, or `openrouter`; provide that provider's key too.
 
-## Run your first search
-
-1. Choose **Notary** or **Venture Capital** in the sidebar and start a search.
-2. Browse the contacts table and select **Open contact** to see details and sources.
-3. Edit the email beside the contact. A plain default template appears if no AI draft is available.
-4. Check the recipient, facts, and signature, then click **Open in email app**.
-5. Choose your personal sending account and click **Send** in your mail app.
-
-No email credentials or SMTP setup are needed in Outreach for this flow. Configure a default email app on your device with your personal account signed in. If nothing opens, check your device or browser's default mail handler. You can also copy the subject and message into your usual mail app.
-
-Failed searches show the error directly and offer **Retry search**, which creates a fresh job. Previous searches remain available. Click **Save draft** or **Save new version** to keep your edits; saved reviews stay attached to their original version. AI evaluation and approval are available under **Quality checks and review history**. Sending is a separate, explicit human decision and does not require an AI passing score.
-
-## Open in your email app
-
-**Open in email app** is the primary action for both Notary and VC drafts. It pre-fills the edited recipient, subject, and message, including changes you have not saved as a new draft version. Enter a valid recipient address if the contact has none. AI suitability verification and draft approval are not required, and you do not need to connect an email account in Outreach.
-
-Opening a draft does not send it or mark it as sent. Review it and click **Send** in your email app; these deliveries are not tracked in Outreach.
-
 ## Optional: send directly from Outreach
 
 Connect your email account in the app; no configuration-file editing is needed:
@@ -136,8 +143,6 @@ SMTP_PASSWORD=your_app_password
 Use the host and credentials supplied by your email provider. For implicit TLS, use `SMTP_SECURITY=ssl` and `SMTP_PORT=465`. Keep credentials in `.env`; some providers require an app password. Username and password may both be blank for servers that allow authenticated network relaying. Plain unencrypted SMTP is not supported.
 
 **Gmail / Google Workspace:** Enable 2-Step Verification and [create a Google app password](https://support.google.com/accounts/answer/185833). The Gmail form fills in the server settings and removes spaces from the app password. For manual setup, use `smtp.gmail.com`, port `587`, and `starttls`; set both `SMTP_FROM` and `SMTP_USERNAME` to your full email address. Some Workspace accounts restrict app passwords; ask your administrator if unavailable. See [Google's SMTP setup](https://knowledge.workspace.google.com/admin/gmail/send-email-from-a-printer-scanner-or-app). Password-based SMTP is supported; OAuth sign-in is outside this MVP.
-
-Suitability being unknown does not block sending: it means website evidence did not confirm the match, not that the recipient's email address is invalid. Review the address and message yourself.
 
 With direct SMTP sending, the app sends one message per click, saves the exact draft and recipient, and records the result in SQLite. A successful send means the SMTP server accepted the message, not guaranteed inbox delivery. Refreshing cannot resend the same draft. If a connection fails during submission, the app marks delivery as uncertain and blocks resending that version; check your mail provider before creating another copy. No bulk sends or automatic follow-ups run.
 
@@ -216,7 +221,7 @@ Results are stored locally, but agent calls send search details, startup descrip
 - **Interrupted search:** Select **Resume search** in Streamlit when available, or use `outreach resume JOB_ID`. If no checkpoint exists, use **Start saved search** or `outreach run JOB_ID`.
 - **Missing key:** Set the API key matching `LLM_PROVIDER` (and `SEARCH_PROVIDER` if different) in `.env` and restart the app. The configuration check below validates settings; it does not test the key against the provider.
 - **Asked for a Groq key when using OpenRouter:** Set `LLM_PROVIDER=openrouter` and `SEARCH_PROVIDER=openrouter`. Adding a key alone does not select a provider. Restart the app, then click **Start saved search** to retry a search that failed before research began.
-- **No draft or manual review required:** Inspect the visible errors and evidence. Correct the issue and click **Retry search**. Contacts without AI drafts still offer a default email template.
+- **No contacts, no draft, or manual review required:** Inspect the visible errors and evidence. Correct the issue and click **Retry search** when offered; this starts a new search and keeps the previous results. Contacts without AI drafts still offer a default email template.
 - **One local user:** Run one application process against the database files. Avoid running CLI workflows alongside Streamlit on the same files. Authentication, background workers, and multi-user hosting are outside this MVP.
 
 Recovery may repeat an interrupted external call; stable record IDs prevent duplicate persisted results. The requested result count is a discovery target, not a guarantee of eligible candidates or drafts. Contacts and model assessments need human review, confidence scores are not calibrated probabilities, and Notary searches do not enforce an exact distance radius.
@@ -228,7 +233,7 @@ uv run python -m notaryoutreach.config --require-api-key
 uv run python -m unittest discover -s tests
 ```
 
-Configuration validation makes no external connection. Tests use temporary databases and mocked providers to cover both workflows, failures, recovery, persistence, and review preservation; they do not verify live provider availability or research quality.
+Configuration validation makes no external connection. Tests use temporary databases and mocked providers to cover both workflows, failures, recovery, persistence, reviews, email-app links, and optional SMTP sending. They do not send real emails or verify live provider availability or research quality.
 
 Provider changes apply to new calls, including resumed jobs and re-evaluation; existing saved results remain unchanged.
 
