@@ -2,7 +2,7 @@
 
 Find notaries for company formation or venture capital investors for your startup, then prepare evidence-based outreach drafts for human review.
 
-Outreach reduces the manual work of finding candidates, checking their websites, and writing a relevant first email. It collects sources, checks suitability, and generates personalized German email drafts in one local app. Emails are sent only when you review the recipient and message and click **Send email**.
+Outreach reduces the manual work of finding candidates, checking their websites, and writing a relevant first email. It collects sources, checks suitability, and generates personalized German email drafts in one local app. Open the draft in your own email app, review it, and send from your personal account. Direct SMTP sending is optional.
 
 | Search | What you provide | What it checks |
 | --- | --- | --- |
@@ -98,19 +98,25 @@ Replace the endpoint and model with your provider's values. Local servers can us
 1. Choose **Notary** or **Venture Capital** in the sidebar and start a search.
 2. Browse the contacts table and select **Open contact** to see details and sources.
 3. Edit the email beside the contact. A plain default template appears if no AI draft is available.
-4. Open **Email sending setup** in the sidebar, connect your account, and save it.
-5. Check the recipient, facts, and signature. Tick **I reviewed this recipient and message**, then click **Send email**.
+4. Check the recipient, facts, and signature, then click **Open in email app**.
+5. Choose your personal sending account and click **Send** in your mail app.
+
+No email credentials or SMTP setup are needed in Outreach for this flow. Configure a default email app on your device first. If nothing opens, check your device or browser's default mail handler. You can also copy the subject and message into your usual mail app.
 
 Failed searches show the error directly and offer **Retry search**, which creates a fresh job. Previous searches remain available. Editing saves a new draft version; saved reviews stay attached to their original version. AI evaluation and approval are available under **Quality checks and review history**. Sending is a separate, explicit human decision and does not require an AI passing score.
 
-## Send from the app
+## Open in your email app
+
+**Open in email app** is the primary action for both Notary and VC drafts. It pre-fills the edited recipient, subject, and message, including changes you have not saved as a new draft version. It works without verification, approval, an app password, or a connected SMTP account. Opening a draft does not send it or mark it as sent; emails sent from your mail app are not tracked in Outreach.
+
+## Optional: send directly from Outreach
 
 Connect your email account in the app; no configuration-file editing is needed:
 
-1. Open **Email sending setup** in the sidebar.
+1. Open **Email sending setup (optional)** in the sidebar.
 2. Choose **Gmail / Google Workspace** and enter your email address and Google app password. For another provider, choose **Custom SMTP** and enter its host, port, encryption, and sign-in details.
 3. Click **Test and save email account**. This checks the connection and sign-in without sending a message. Failed checks leave the previous account unchanged.
-4. Review a draft, replace its signature placeholder, tick the confirmation box, and click **Send email**. No restart is needed after connecting.
+4. Open **Send directly from this app (optional)** beneath a draft, replace its signature placeholder, tick the confirmation box, and click **Send email**. No restart is needed after connecting.
 
 The account is saved in this repo's local `.env`, which is ignored by Git. Passwords are stored unencrypted locally, with owner-only file permissions where supported, and are cleared from the form after submission. AI settings are preserved. SMTP environment variables take precedence; remove those overrides before editing the account in the UI.
 
@@ -129,9 +135,9 @@ Use the host and credentials supplied by your email provider. For implicit TLS, 
 
 **Gmail / Google Workspace:** Enable 2-Step Verification and [create a Google app password](https://support.google.com/accounts/answer/185833). The Gmail form fills in the server settings and removes spaces from the app password. For manual setup, use `smtp.gmail.com`, port `587`, and `starttls`; set both `SMTP_FROM` and `SMTP_USERNAME` to your full email address. Some Workspace accounts restrict app passwords; ask your administrator if unavailable. See [Google's SMTP setup](https://knowledge.workspace.google.com/admin/gmail/send-email-from-a-printer-scanner-or-app). Password-based SMTP is supported; OAuth sign-in is outside this MVP.
 
-Without SMTP setup, **Open in email app** opens the edited draft in your configured mail app. Send it there; those deliveries are not tracked here. Suitability being unknown does not block sending: it means website evidence did not confirm the match, not that the recipient's email address is invalid. Review the address and message yourself.
+Suitability being unknown does not block sending: it means website evidence did not confirm the match, not that the recipient's email address is invalid. Review the address and message yourself.
 
-The app sends one message per click, saves the exact draft and recipient, and records the result in SQLite. A successful send means the SMTP server accepted the message, not guaranteed inbox delivery. Refreshing cannot resend the same draft. If a connection fails during submission, the app marks delivery as uncertain and blocks resending that version; check your mail provider before creating another copy. No bulk sends or automatic follow-ups run.
+With direct SMTP sending, the app sends one message per click, saves the exact draft and recipient, and records the result in SQLite. A successful send means the SMTP server accepted the message, not guaranteed inbox delivery. Refreshing cannot resend the same draft. If a connection fails during submission, the app marks delivery as uncertain and blocks resending that version; check your mail provider before creating another copy. No bulk sends or automatic follow-ups run.
 
 ## How it works
 
@@ -140,6 +146,7 @@ Both search modes use the same service and four agents. The selected target chan
 ```mermaid
 flowchart TD
     UI["Streamlit: contacts, email editor, send"] --> Service["OutreachService"]
+    UI -->|Open draft; send there| MailApp["Your email app"]
     CLI["CLI"] --> Service
     Service --> Workflow
     subgraph Workflow["Shared LangGraph workflow"]
