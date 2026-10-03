@@ -204,7 +204,6 @@ class DiscoveryAgent:
     ) -> list[Candidate]:
         context = context or OutreachContext(location=location, company_type=company_type)
         system = self._system_prompt()
-        prompt = self._build_prompt(location, company_type, count, excluded_domains)
         if context.target_type == "vc":
             system = (
                 "Discover real venture capital firms or investors using live web information. "
@@ -217,8 +216,12 @@ class DiscoveryAgent:
                 "metadata may contain role, investment_focus, funding_stage_hint and geography_hint. "
                 "Return one lead per firm; exclude directories and the supplied excluded domains."
             )
-            prompt = json.dumps({**context.model_dump(), "count": count,
-                                 "excluded_domains": sorted(excluded_domains)}, ensure_ascii=False)
+        prompt = json.dumps({
+            **context.model_dump(), "count": count,
+            "excluded_domains": sorted(excluded_domains),
+            "search_request": self._build_prompt(location, company_type, count, excluded_domains)
+            if context.target_type == "notary" else "Find sourced venture capital firms matching these search criteria.",
+        }, ensure_ascii=False)
         content = self.provider.search(system_prompt=system, prompt=prompt)
         if not isinstance(content, str) or not content.strip():
             raise ValueError("Search provider returned no content.")
