@@ -29,8 +29,12 @@ def execute_job(service: OutreachService, job_id: str, *, resume: bool = False) 
             st.session_state["notice"] = "Search returned no contacts. See the error below, then retry the search."
             st.session_state["notice_level"] = "error"
         elif results["job"]["status"] == "manual_review":
-            st.session_state["notice"] = "Search finished with items needing review. Inspect the results and any reported issues."
-            st.session_state["notice_level"] = "warning"
+            if not results["workflow_errors"] and not results["verifications"]:
+                st.session_state["notice"] = "Search finished. Review contact details and edit the email templates below."
+                st.session_state["notice_level"] = "success"
+            else:
+                st.session_state["notice"] = "Search finished with items needing review. Inspect the results and any reported issues."
+                st.session_state["notice_level"] = "warning"
         else:
             st.session_state["notice"] = "Search finished. Review the results and email drafts below."
             st.session_state["notice_level"] = "success"
@@ -161,6 +165,10 @@ def render_draft(service: OutreachService, job_id: str, draft: dict, results: di
 
     if not template:
         with st.expander("Quality checks and review history"):
+            provider_values = {**dotenv_values(service.env_file), **os.environ}
+            model_enabled = service.agents[3] is not None or (provider_values.get("LLM_PROVIDER") or "groq").strip().lower() != "none"
+            if not model_enabled:
+                st.caption("Review the recipient, facts, and wording yourself. AI evaluation needs a configured model provider.")
             st.caption(f"Human review: {decision}")
             if evaluation:
                 st.write("Evaluation:", "Passed" if evaluation["passed"] else "Needs review")
@@ -170,7 +178,7 @@ def render_draft(service: OutreachService, job_id: str, draft: dict, results: di
             else:
                 st.caption("Not evaluated. Check the recipient, facts, and wording before sending.")
             with st.container(horizontal=True):
-                evaluated = st.button("Re-evaluate" if evaluation else "Evaluate draft", key=f"evaluate-{draft_id}", disabled=changed)
+                evaluated = st.button("Re-evaluate" if evaluation else "Evaluate draft", key=f"evaluate-{draft_id}", disabled=changed or not model_enabled)
                 approved = st.button("Approve", key=f"approve-{draft_id}", disabled=changed or not evaluation or not evaluation["passed"] or decision == "approved")
                 rejected = st.button("Reject", key=f"reject-{draft_id}", disabled=changed or decision == "rejected")
             if evaluated or approved or rejected:
@@ -292,6 +300,8 @@ def main() -> None:
         service = OutreachService(storage, checkpoint_path=settings.get("CHECKPOINT_PATH") or "runs/checkpoints.sqlite3")
         with st.sidebar:
             st.header("Find contacts")
+            if (settings.get("LLM_PROVIDER") or "groq").strip().lower() == "none":
+                st.info("Search finds contacts and provides editable email templates. Review contact details and suitability before sending.")
             render_search(service)
             render_email_setup(service)
         render_results(service)
