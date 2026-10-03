@@ -15,6 +15,12 @@ def failure_message(exc: Exception) -> str:
         return "Provider setup error: " + str(current)
     status = getattr(current, "status_code", None)
     if status == 403:
+        body = getattr(current, "body", None)
+        error = body.get("error", body) if isinstance(body, dict) else body
+        detail = error.get("message", "") if isinstance(error, dict) else error
+        detail = detail.lower() if isinstance(detail, str) else ""
+        if "used all available credits" in detail or "reached its monthly spending limit" in detail:
+            return "The provider reports exhausted credits or a reached monthly spending limit. Add credits or raise the spending limit in your provider account, then retry."
         return "The provider rejected access. Check API key and model permissions, available credits, and your spending limit."
     if status == 401:
         return "The provider rejected access. Check the selected API key and model permissions."
