@@ -26,6 +26,8 @@ def failure_message(exc: Exception) -> str:
         return "The provider rejected access. Check the selected API key and model permissions."
     if status == 402:
         return "The provider requires more credits. Check your balance and key spending limit, then retry."
+    if status in (432, 433):
+        return "Tavily's usage or spending limit was reached. Check your Tavily dashboard and increase the limit, then retry."
     if status == 404:
         return "The selected model is unavailable. Check LLM_MODEL and SEARCH_MODEL, then retry the search."
     if status == 429:

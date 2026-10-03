@@ -197,10 +197,14 @@ class OpenRouterProvider(ModelProvider):
         return json.dumps({"content": message["content"], "citations": citations}, ensure_ascii=False)
 
 
-def create_provider(settings: ProviderSettings) -> ModelProvider:
+def create_provider(settings: ProviderSettings, *, formatter=None):
     """Create only the selected client; never fall back to another provider."""
     if not settings.api_key:
         raise ValueError("The selected provider requires an API key.")
+    if settings.name == "tavily":
+        from .tavily import TavilyProvider
+
+        return TavilyProvider(settings, formatter=formatter)
     if settings.name == "groq":
         return GroqAdapter(settings)
     if settings.name == "anthropic":
