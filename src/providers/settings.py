@@ -14,6 +14,7 @@ DEFAULT_MODELS = {
     "openrouter": "openai/gpt-4.1-mini",
 }
 KEY_NAMES = {
+    "tavily": "TAVILY_API_KEY",
     "grok": "GROK_API_KEY",
     "groq": "GROQ_API_KEY", "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY", "openai_compatible": "LLM_API_KEY",
@@ -33,11 +34,18 @@ class ProviderSettings:
 def provider_settings(values: dict, *, search: bool = False, require_key: bool = False) -> ProviderSettings:
     """Resolve one provider without reading global environment or opening clients."""
     primary = (values.get("LLM_PROVIDER") or "groq").strip().lower()
-    name = ((values.get("SEARCH_PROVIDER") or primary) if search else primary).strip().lower()
+    name = ((values.get("SEARCH_PROVIDER") or ("tavily" if primary == "none" else primary)) if search else primary).strip().lower()
+    if not search and name == "none":
+        return ProviderSettings("none", "", None, "")
+    if not search and name == "tavily":
+        raise ProviderConfigurationError(
+            "Tavily provides web search. Set SEARCH_PROVIDER=tavily and LLM_PROVIDER=none "
+            "for editable email templates, or select a model provider for AI checks and drafts."
+        )
     if name not in KEY_NAMES:
-        raise ProviderConfigurationError("Set LLM_PROVIDER and SEARCH_PROVIDER to grok, groq, openai, anthropic, openrouter, or openai_compatible.")
+        raise ProviderConfigurationError("Choose a supported LLM_PROVIDER (or none for templates). SEARCH_PROVIDER also supports tavily.")
     if search and name == "openai_compatible":
-        raise ProviderConfigurationError("Set SEARCH_PROVIDER to grok, groq, openai, anthropic, or openrouter for live discovery.")
+        raise ProviderConfigurationError("Set SEARCH_PROVIDER to tavily, grok, groq, openai, anthropic, or openrouter for live discovery.")
     key_name = KEY_NAMES[name]
     key = (values.get(key_name) or "").strip() or None
     if name == "grok" and key is None:
@@ -47,6 +55,8 @@ def provider_settings(values: dict, *, search: bool = False, require_key: bool =
             f"Set {key_name} in the environment or .env file. "
             "If you use another provider, change LLM_PROVIDER and SEARCH_PROVIDER to match your key."
         )
+    if name == "tavily":
+        return ProviderSettings("tavily", "", key, "", "https://api.tavily.com")
     model = (values.get("LLM_MODEL") or "").strip() if not search or (name == primary == "openrouter") else ""
     model = model or DEFAULT_MODELS.get(name, "")
     search_model = (values.get("SEARCH_MODEL") or "").strip()
