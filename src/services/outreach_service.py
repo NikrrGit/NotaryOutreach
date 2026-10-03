@@ -205,10 +205,28 @@ class OutreachService:
         """Share configured clients and close them even after failures."""
         from providers.clients import create_provider
         from providers.settings import provider_settings
+        from providers.errors import ProviderConfigurationError
 
         discovery, verifier, writer, evaluator = self.agents
         with ExitStack() as stack:
             values = {**dotenv_values(self.env_file), **os.environ}
+            if provider_settings(values).name == "none" and any(
+                agent is None for agent in (verifier, writer, evaluator)
+            ):
+                if evaluation_only:
+                    if evaluator is None:
+                        raise ProviderConfigurationError(
+                            "AI evaluation requires an LLM_PROVIDER and its API key. "
+                            "Review and edit the email template before sending."
+                        )
+                    yield discovery, verifier, writer, evaluator
+                    return
+                if discovery is None:
+                    search_provider = create_provider(provider_settings(values, search=True, require_key=True))
+                    stack.callback(search_provider.close)
+                    discovery = DiscoveryAgent(provider=search_provider)
+                yield discovery, None, None, None
+                return
             provider = None
             if evaluator is None or (not evaluation_only and (writer is None or verifier is None)):
                 provider = create_provider(provider_settings(values, require_key=True))
@@ -221,7 +239,7 @@ class OutreachService:
                     if provider is not None and settings.name == provider.settings.name:
                         search_provider = provider
                     else:
-                        search_provider = create_provider(settings)
+                        search_provider = create_provider(settings, formatter=provider) if settings.name == "tavily" else create_provider(settings)
                         stack.callback(search_provider.close)
                     discovery = DiscoveryAgent(provider=search_provider)
                 verifier = verifier if verifier is not None else VerificationAgent(provider=provider.assess)
@@ -298,7 +316,8 @@ class OutreachService:
                     self.storage.update_job(job_id, status="running")
                     with self._agent_session() as (discovery, verifier, writer, evaluator):
                         graph = build_workflow(discovery_agent=discovery, verification_agent=verifier,
-                                               email_writer=writer, evaluator=evaluator, checkpointer=saver)
+                                               email_writer=writer, evaluator=evaluator, checkpointer=saver,
+                                               search_only=verifier is None)
                         for state in graph.stream(None if resume else initial, config,
                                                   stream_mode="values", durability="sync"):
                             self._persist_state(job_id, state)
