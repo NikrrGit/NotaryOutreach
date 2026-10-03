@@ -14,7 +14,9 @@ def failure_message(exc: Exception) -> str:
     if isinstance(current, ProviderConfigurationError):
         return "Provider setup error: " + str(current)
     status = getattr(current, "status_code", None)
-    if status in (401, 403):
+    if status == 403:
+        return "The provider rejected access. Check API key and model permissions, available credits, and your spending limit."
+    if status == 401:
         return "The provider rejected access. Check the selected API key and model permissions."
     if status == 402:
         return "The provider requires more credits. Check your balance and key spending limit, then retry."

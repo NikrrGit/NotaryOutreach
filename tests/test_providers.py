@@ -23,7 +23,7 @@ from storage.sqlite import SQLiteStorage
 
 class ProviderTests(unittest.TestCase):
     def test_settings_select_keys_models_and_keep_secrets_private(self):
-        for name, key_name in (("groq", "GROQ_API_KEY"), ("openai", "OPENAI_API_KEY"),
+        for name, key_name in (("grok", "GROK_API_KEY"), ("groq", "GROQ_API_KEY"), ("openai", "OPENAI_API_KEY"),
                                ("anthropic", "ANTHROPIC_API_KEY"), ("openrouter", "OPENROUTER_API_KEY")):
             with self.subTest(provider=name), TemporaryDirectory() as directory:
                 env = Path(directory) / ".env"
@@ -35,6 +35,14 @@ class ProviderTests(unittest.TestCase):
                 self.assertEqual(config.llm.model, "custom-model")
                 self.assertEqual(config.search.name, name)
                 self.assertNotIn("secret", repr(config))
+
+    def test_grok_accepts_xai_key_and_rejects_missing_key(self):
+        settings = provider_settings({"LLM_PROVIDER": "grok", "XAI_API_KEY": "test-key"}, require_key=True)
+        self.assertEqual(settings.api_key, "test-key")
+        self.assertEqual(settings.base_url, "https://api.x.ai/v1")
+        self.assertEqual(settings.model, "grok-4.7")
+        with self.assertRaises(ValueError):
+            provider_settings({"LLM_PROVIDER": "grok"}, require_key=True)
 
     def test_invalid_provider_settings_and_missing_selected_key(self):
         cases = [
@@ -55,7 +63,7 @@ class ProviderTests(unittest.TestCase):
                 provider_settings({"LLM_PROVIDER": "openai_compatible", "LLM_MODEL": "test", "LLM_BASE_URL": url})
 
     def test_generation_validates_schema_and_rejects_incomplete_output(self):
-        for name, adapter in (("openai", OpenAIProvider), ("anthropic", AnthropicProvider)):
+        for name, adapter in (("grok", OpenAIProvider), ("openai", OpenAIProvider), ("anthropic", AnthropicProvider)):
             client = Mock()
             provider = adapter(provider_settings({"LLM_PROVIDER": name}), client)
             for text in ('{}', '[]', 'not json', '{"subject":"","body":"x"}'):
@@ -120,7 +128,7 @@ class ProviderTests(unittest.TestCase):
         self.assertIn("web_search_tool_result", client.messages.create.call_args.kwargs["messages"][0]["content"])
 
     def test_native_api_failures_propagate_without_fallback(self):
-        for name, adapter in (("openai", OpenAIProvider), ("anthropic", AnthropicProvider)):
+        for name, adapter in (("grok", OpenAIProvider), ("openai", OpenAIProvider), ("anthropic", AnthropicProvider)):
             client = Mock()
             client.responses.create.side_effect = TimeoutError("offline")
             client.messages.create.side_effect = TimeoutError("offline")
@@ -170,7 +178,7 @@ class ProviderTests(unittest.TestCase):
                 provider.close.assert_called_once()
 
     def test_all_providers_run_both_targets_and_preserve_reviews(self):
-        for name in ("groq", "openai", "anthropic", "openai_compatible", "openrouter"):
+        for name in ("grok", "groq", "openai", "anthropic", "openai_compatible", "openrouter"):
             for target in ("notary", "vc"):
                 with self.subTest(provider=name, target=target):
                     self._run_workflow(name, target)
@@ -200,6 +208,9 @@ class ProviderTests(unittest.TestCase):
                     "code": "tool_use_failed", "message": "Tool choice is none, but model called a tool",
                 }})
             research = "tools" in body or "plugins" in body
+            if name == "grok":
+                self.assertEqual(str(request.url), "https://api.x.ai/v1/responses")
+                self.assertEqual(request.headers["authorization"], "Bearer test-key")
             if name == "openrouter":
                 self.assertEqual(str(request.url), "https://openrouter.ai/api/v1/chat/completions")
                 self.assertEqual(request.headers["authorization"], "Bearer test-key")
@@ -230,7 +241,7 @@ class ProviderTests(unittest.TestCase):
                     }}]
             return httpx.Response(200, json=data)
 
-        sdk, patch_path = {"openai": (OpenAI, "openai.OpenAI"), "anthropic": (Anthropic, "anthropic.Anthropic"),
+        sdk, patch_path = {"grok": (OpenAI, "openai.OpenAI"), "openai": (OpenAI, "openai.OpenAI"), "anthropic": (Anthropic, "anthropic.Anthropic"),
                            "groq": (Groq, "providers.groq.Groq"),
                            "openrouter": (OpenAI, "openai.OpenAI"),
                            "openai_compatible": (OpenAI, "openai.OpenAI")}[name]

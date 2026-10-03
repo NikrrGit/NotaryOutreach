@@ -67,8 +67,11 @@ AI evaluation and draft approval are optional for sending. If a draft was alread
 
 Set `LLM_PROVIDER` and its matching API key in `.env`; no code changes are needed.
 
+For Grok (xAI), set `LLM_PROVIDER=grok`, `SEARCH_PROVIDER=grok`, and `GROK_API_KEY` (or `XAI_API_KEY`). Clear old `LLM_MODEL` and `SEARCH_MODEL` overrides to use the Grok defaults. Generation and live discovery use the [xAI Responses API](https://docs.x.ai/developers/tools/web-search). Grok and Groq are separate providers.
+
 | `LLM_PROVIDER` | Key | Default generation model | Default live search model |
 | --- | --- | --- | --- |
+| `grok` | `GROK_API_KEY` (or `XAI_API_KEY`) | `grok-4.7` | `grok-4.7` |
 | `groq` (default) | `GROQ_API_KEY` | `openai/gpt-oss-20b` | `openai/gpt-oss-120b` |
 | `openai` | `OPENAI_API_KEY` | `gpt-4.1-mini` | `gpt-4.1-mini` |
 | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` | `claude-sonnet-4-6` |
@@ -116,7 +119,7 @@ SEARCH_PROVIDER=openai
 OPENAI_API_KEY=your_openai_api_key
 ```
 
-Replace the endpoint and model with your provider's values. Local servers can use an HTTP URL and a nonempty placeholder key if they do not require authentication. This supports compatible APIs, not arbitrary SDKs. `SEARCH_PROVIDER` can be `groq`, `openai`, `anthropic`, or `openrouter`; provide that provider's key too.
+Replace the endpoint and model with your provider's values. Local servers can use an HTTP URL and a nonempty placeholder key if they do not require authentication. This supports compatible APIs, not arbitrary SDKs. `SEARCH_PROVIDER` can be `grok`, `groq`, `openai`, `anthropic`, or `openrouter`; provide that provider's key too.
 
 ## Optional: send directly from Outreach
 

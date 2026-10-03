@@ -101,7 +101,7 @@ class OpenAIProvider(ModelProvider):
     @staticmethod
     def _text(response) -> str:
         if response.status != "completed" or not response.output_text.strip():
-            raise RuntimeError("OpenAI returned an incomplete or empty response.")
+            raise RuntimeError("The provider returned an incomplete or empty response.")
         return response.output_text
 
     def _research(self, system_prompt: str, prompt: str) -> str:
@@ -111,7 +111,7 @@ class OpenAIProvider(ModelProvider):
         )
         self._text(response)
         if not any(item.type == "web_search_call" and item.status == "completed" for item in response.output):
-            raise RuntimeError("OpenAI discovery did not complete a live web search.")
+            raise RuntimeError("The provider did not complete a live web search.")
         return json.dumps([item.model_dump(mode="json") for item in response.output], ensure_ascii=False)
 
 
@@ -207,14 +207,14 @@ def create_provider(settings: ProviderSettings) -> ModelProvider:
         from anthropic import Anthropic
 
         return AnthropicProvider(settings, Anthropic(api_key=settings.api_key, timeout=120.0, max_retries=2))
-    if settings.name in {"openai", "openai_compatible", "openrouter"}:
+    if settings.name in {"grok", "openai", "openai_compatible", "openrouter"}:
         from openai import OpenAI
 
         client = OpenAI(
             api_key=settings.api_key, timeout=120.0, max_retries=2,
             base_url=settings.base_url or "https://api.openai.com/v1",
         )
-        adapter = {"openai": OpenAIProvider, "openai_compatible": CompatibleProvider,
+        adapter = {"grok": OpenAIProvider, "openai": OpenAIProvider, "openai_compatible": CompatibleProvider,
                    "openrouter": OpenRouterProvider}[settings.name]
         return adapter(settings, client)
     raise ValueError("Unsupported provider.")
