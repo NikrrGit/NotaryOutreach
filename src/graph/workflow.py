@@ -50,6 +50,7 @@ def build_workflow(
     email_writer: Any,
     evaluator: EvaluateDraft,
     checkpointer: BaseCheckpointSaver | None = None,
+    search_only: bool = False,
 ):
     """Build a graph that produces drafts for human review without sending them.
 
@@ -57,6 +58,7 @@ def build_workflow(
     VerificationResult and returning the state's EvaluationResult.
     Pass an open durable checkpointer to enable restart/resume, and keep its
     connection open for the lifetime of graph execution.
+    Search-only runs stop after discovery for human review and template editing.
     """
     nodes = WorkflowNodes(
         discovery=discovery_agent,
@@ -66,6 +68,13 @@ def build_workflow(
         persist_draft=lambda *_: None,
     )
     graph = StateGraph(WorkflowState)
+    if search_only:
+        graph.add_node("discover", nodes.discover)
+        graph.add_node("manual_review", lambda state: {"status": "manual_review"})
+        graph.add_edge(START, "discover")
+        graph.add_edge("discover", "manual_review")
+        graph.add_edge("manual_review", END)
+        return graph.compile(checkpointer=checkpointer)
 
     def verify_node(state: WorkflowState) -> dict:
         resolved = [result for result in _verifications(state).values() if verification_resolved(result)]
