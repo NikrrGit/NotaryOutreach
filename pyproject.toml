@@ -11,6 +11,7 @@ dependencies = [
     "groq",
     "openai>=2,<3",
     "anthropic>=0.75,<1",
+    "httpx>=0.28,<1",
     "pypdf",
     "python-dotenv>=1,<2",
     "pydantic>=2,<3",

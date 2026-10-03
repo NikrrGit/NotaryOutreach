@@ -720,6 +720,7 @@ source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
     { name = "groq" },
+    { name = "httpx" },
     { name = "langgraph" },
     { name = "langgraph-checkpoint-sqlite" },
     { name = "openai" },
@@ -733,6 +734,7 @@ dependencies = [
 requires-dist = [
     { name = "anthropic", specifier = ">=0.75,<1" },
     { name = "groq" },
+    { name = "httpx", specifier = ">=0.28,<1" },
     { name = "langgraph", specifier = ">=1.2.11" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=3,<5" },
     { name = "openai", specifier = ">=2,<3" },
