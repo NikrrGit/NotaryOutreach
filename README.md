@@ -2,7 +2,7 @@
 
 Find notaries for company formation or venture capital investors for your startup, review their details, and prepare your first email in one local app.
 
-Outreach researches contacts, checks website evidence, and drafts German emails. Edit a draft, open it in your usual email app, and send from your personal account. Clone the repo and add an AI provider key to get started; results and reviews are stored in SQLite on your computer.
+Outreach researches contacts and provides editable German email templates. An optional model provider adds website suitability checks and AI drafts. Edit an email, open it in your usual email app, and send from your personal account. Results and reviews are stored in SQLite on your computer.
 
 | Search | What you provide | What it checks |
 | --- | --- | --- |
@@ -11,7 +11,7 @@ Outreach researches contacts, checks website evidence, and drafts German emails.
 
 ## Quick start
 
-You need Git, [uv](https://docs.astral.sh/uv/getting-started/installation/), and an API key from Groq, OpenAI, Anthropic, or OpenRouter. The project uses Python 3.13.
+You need Git, [uv](https://docs.astral.sh/uv/getting-started/installation/), and a Tavily API key for search, or a supported model-provider key for the AI workflow. The project uses Python 3.13.
 
 ```sh
 git clone https://github.com/NikrrGit/NotaryOutreach.git
@@ -23,11 +23,12 @@ cp .env.example .env
 
 On Windows PowerShell, use `Copy-Item .env.example .env` for the last command.
 
-Open `.env`, choose a provider, and set its key. For example:
+Open `.env` and set your Tavily key:
 
 ```dotenv
-LLM_PROVIDER=openai
-OPENAI_API_KEY=your_openai_api_key
+LLM_PROVIDER=none
+SEARCH_PROVIDER=tavily
+TAVILY_API_KEY=your_tavily_api_key
 ```
 
 Start the app from the project directory:
@@ -66,6 +67,19 @@ AI evaluation and draft approval are optional for sending. If a draft was alread
 ## Choose your provider
 
 Set `LLM_PROVIDER` and its matching API key in `.env`; no code changes are needed.
+
+For [Tavily search](https://docs.tavily.com/documentation/api-reference/endpoint/search), set `SEARCH_PROVIDER=tavily` and `TAVILY_API_KEY`. Use `LLM_PROVIDER=none` when Tavily is your only key. Searches save sourced contacts and stop for manual review; each contact offers an editable default email. Suitability stays unverified and AI evaluation is unavailable. The app extracts contact details from returned page text; missing names or locations and directory results are skipped. Public emails are retained when they match the source website's domain.
+
+To add AI suitability checks, research formatting, and generated drafts while keeping Tavily for search, select a model provider and supply its key as well:
+
+```dotenv
+SEARCH_PROVIDER=tavily
+TAVILY_API_KEY=your_tavily_api_key
+LLM_PROVIDER=openai
+OPENAI_API_KEY=your_openai_api_key
+LLM_MODEL=
+SEARCH_MODEL=
+```
 
 For Grok (xAI), set `LLM_PROVIDER=grok`, `SEARCH_PROVIDER=grok`, and `GROK_API_KEY` (or `XAI_API_KEY`). Clear old `LLM_MODEL` and `SEARCH_MODEL` overrides to use the Grok defaults. Generation and live discovery use the [xAI Responses API](https://docs.x.ai/developers/tools/web-search). Grok and Groq are separate providers.
 
@@ -119,7 +133,7 @@ SEARCH_PROVIDER=openai
 OPENAI_API_KEY=your_openai_api_key
 ```
 
-Replace the endpoint and model with your provider's values. Local servers can use an HTTP URL and a nonempty placeholder key if they do not require authentication. This supports compatible APIs, not arbitrary SDKs. `SEARCH_PROVIDER` can be `grok`, `groq`, `openai`, `anthropic`, or `openrouter`; provide that provider's key too.
+Replace the endpoint and model with your provider's values. Local servers can use an HTTP URL and a nonempty placeholder key if they do not require authentication. This supports compatible APIs, not arbitrary SDKs. `SEARCH_PROVIDER` can be `tavily`, `grok`, `groq`, `openai`, `anthropic`, or `openrouter`; provide that provider's key too.
 
 ## Optional: send directly from Outreach
 
@@ -204,11 +218,12 @@ Commands return JSON on stdout and diagnostics on stderr. `notaryoutreach` is an
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `LLM_PROVIDER` | `groq` | Provider for verification, drafting, and evaluation |
+| `LLM_PROVIDER` | `groq` when unset; `none` in `.env.example` | Model provider for verification, drafting, and evaluation; `none` uses editable templates |
 | Provider API key | None | Use the matching key above; saved results can be browsed without it |
 | `LLM_MODEL` | Provider default | Generation model override |
-| `SEARCH_PROVIDER` | Same as `LLM_PROVIDER` | Provider for discovery, including OpenRouter |
-| `SEARCH_MODEL` | Search provider default | Live search model override |
+| `SEARCH_PROVIDER` | Same as `LLM_PROVIDER`, or `tavily` when it is `none` | Provider for discovery; `.env.example` selects Tavily |
+| `TAVILY_API_KEY` | None | Key for Tavily discovery |
+| `SEARCH_MODEL` | Search provider default | Live search model override; ignored by Tavily |
 | `LLM_BASE_URL`, `LLM_API_KEY` | None | Custom endpoint URL and key; used only for `openai_compatible` |
 | `DATABASE_PATH` | `data/outreach.db` | Application results and review history |
 | `CHECKPOINT_PATH` | `runs/checkpoints.sqlite3` | Workflow progress and recovery |
@@ -223,6 +238,7 @@ Results are stored locally, but agent calls send search details, startup descrip
 
 - **Interrupted search:** Select **Resume search** in Streamlit when available, or use `outreach resume JOB_ID`. If no checkpoint exists, use **Start saved search** or `outreach run JOB_ID`.
 - **Missing key:** Set the API key matching `LLM_PROVIDER` (and `SEARCH_PROVIDER` if different) in `.env` and restart the app. The configuration check below validates settings; it does not test the key against the provider.
+- **Tavily key but still asked for a model key:** Set `SEARCH_PROVIDER=tavily` and `LLM_PROVIDER=none` to use contact search and email templates. Tavily does not replace a generation model. Restart the app and use **Retry search** for a previous failed search.
 - **Asked for a Groq key when using OpenRouter:** Set `LLM_PROVIDER=openrouter` and `SEARCH_PROVIDER=openrouter`. Adding a key alone does not select a provider. Restart the app, then click **Start saved search** to retry a search that failed before research began.
 - **No contacts, no draft, or manual review required:** Inspect the visible errors and evidence. Correct the issue and click **Retry search** when offered; this starts a new search and keeps the previous results. Contacts without AI drafts still offer a default email template.
 - **One local user:** Run one application process against the database files. Avoid running CLI workflows alongside Streamlit on the same files. Authentication, background workers, and multi-user hosting are outside this MVP.
